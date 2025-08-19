@@ -1,0 +1,15 @@
+[package]
+name = "smalisa"
+version = "0.2.0"
+authors = ["Danny Rosseau <drosseau@protonmail.com>"]
+edition = "2018"
+
+[dependencies]
+bitflags = "2.9"
+thiserror = "1.0"
+smallvec = "1.15"
+
+[features]
+default = ["annotations"]
+# Don't skip over annotations
+annotations = []
