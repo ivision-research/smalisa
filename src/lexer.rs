@@ -1,4 +1,4 @@
-use std::io::{self, Bytes, Read};
+use std::io::{self, Bytes, BufReader, Read};
 
 use thiserror::Error;
 
@@ -107,7 +107,7 @@ where
     lines: isize,
     byte_offset_in_line: isize,
 
-    bytes: Bytes<R>,
+    bytes: Bytes<BufReader<R>>,
     buf: StrStorage<'a>,
 }
 
@@ -119,7 +119,7 @@ where
         Self {
             peeked: 0,
             state: LexState::Normal,
-            bytes: reader.bytes(),
+            bytes: BufReader::new(reader).bytes(),
             lines: 0,
             byte_offset_in_line: 0,
             buf: StrStorage::new(),
