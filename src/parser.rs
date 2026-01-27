@@ -119,10 +119,10 @@ pub fn parse_method<'a, 'b, P: LineParse<'a>>(
 pub enum ParseError<'a> {
     #[error("lexing: {0}")]
     Lex(LexError<'a>),
-    #[error("unexpected token: {0:?} at line {1}")]
-    UnexpectedToken(Token<'a>, isize),
-    #[error("expected token {0:?} but got token {1:?} at line {2}")]
-    WrongToken(Token<'a>, Token<'a>, isize),
+    #[error("unexpected token: {0:?} near offset {1}")]
+    UnexpectedToken(Token<'a>, usize),
+    #[error("expected token {0:?} but got token {1:?} near offset {2}")]
+    WrongToken(Token<'a>, Token<'a>, usize),
     #[error("bad label: {0}")]
     BadLabel(&'a str),
     #[error("unsupported instruction: {0}")]
@@ -206,7 +206,7 @@ where
             }
             _ => Err(ParseError::UnexpectedToken(
                 self.token,
-                self.lexer.get_line_num(),
+                self.lexer.get_offset(),
             )),
         }
     }
@@ -247,7 +247,7 @@ macro_rules! unexpected_tok {
     ($self:ident) => {
         return Err(ParseError::UnexpectedToken(
             $self.token,
-            $self.lexer.get_line_num(),
+            $self.lexer.get_offset(),
         ))
     };
 }
@@ -257,7 +257,7 @@ macro_rules! wrong_tok {
         return Err(ParseError::WrongToken(
             $self.token,
             Token::$expected,
-            $self.lexer.get_line_num(),
+            $self.lexer.get_offset(),
         ));
     };
 }
@@ -1100,7 +1100,7 @@ where
             Err(ParseError::WrongToken(
                 tok,
                 self.token,
-                self.lexer.get_line_num(),
+                self.lexer.get_offset(),
             ))
         }
     }

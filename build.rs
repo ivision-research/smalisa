@@ -31,7 +31,8 @@ fn generate_lexer_matches() {
     let name = Path::new(&out_dir).join("lex_gen.rs");
     let mut out = File::create(&name).unwrap();
     out.write_all(
-        r#"impl <'a, 'b, R: Read> Lexer<'a, R>
+        r#"#[rust_analyzer::skip]
+        impl <'a, 'b, R: Read> Lexer<'a, R>
 where
     'a: 'b,
 {
@@ -155,7 +156,7 @@ fn gen_string_match_recurse(
         r#"self.buf.push(c);
 self.take_until_whitespace()?;
 let rem = self.buf.take_str_unchecked();
-return Err(LexError::Unknown{}(rem, self.get_line_num(), self.byte_offset_in_line));"#,
+return Err(LexError::Unknown{}(rem, self.offset));"#,
         token_type
     ))
     .unwrap();

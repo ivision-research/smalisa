@@ -18,26 +18,26 @@ pub enum LexError<'a> {
     EOF,
     #[error("unexpected EOF")]
     UnexpectedEOF,
-    #[error("unterminated string at {0}:{1}")]
-    UnterminatedString(isize, isize),
-    #[error("bad string escape \\{0} at {1}:{2}")]
-    BadStringEscape(char, isize, isize),
-    #[error("unexpected byte {} at {}:{}", (*.0 as char), *.1, *.2)]
-    UnexpectedByte(u8, isize, isize),
-    #[error("unknown directive {0} at {1}:{2}")]
-    UnknownDirective(&'a str, isize, isize),
-    #[error("unknown annotation visibility {0} at {1}:{2}")]
-    UnknownAnnotationVisibility(&'a str, isize, isize),
-    #[error("unknown instruction {0} at {1}:{2}")]
-    UnknownInstruction(&'a str, isize, isize),
-    #[error("unknown access spec {0} at {1}:{2}")]
-    UnknownAccessSpec(&'a str, isize, isize),
-    #[error("bad numeric: {0} at {1}:{2}")]
-    BadNumeric(&'a str, isize, isize),
-    #[error("bad register: {0} at {1}:{2}")]
-    BadRegister(&'a str, isize, isize),
-    #[error("input contains invalid smali at {0}:{1}")]
-    InvalidInput(isize, isize),
+    #[error("unterminated string at offset {0}")]
+    UnterminatedString(usize),
+    #[error("bad string escape \\{0} at offset {1}")]
+    BadStringEscape(char, usize),
+    #[error("unexpected byte {} at offset {}", (*.0 as char), *.1)]
+    UnexpectedByte(u8, usize),
+    #[error("unknown directive {0} at offset {1}")]
+    UnknownDirective(&'a str, usize),
+    #[error("unknown annotation visibility {0} at offset {1}")]
+    UnknownAnnotationVisibility(&'a str, usize),
+    #[error("unknown instruction {0} at offset {1}")]
+    UnknownInstruction(&'a str, usize),
+    #[error("unknown access spec {0} at offset {1}")]
+    UnknownAccessSpec(&'a str, usize),
+    #[error("bad numeric: {0} at offset {1}")]
+    BadNumeric(&'a str, usize),
+    #[error("bad register: {0} at offset {1}")]
+    BadRegister(&'a str, usize),
+    #[error("input contains invalid smali at offset {0}")]
+    InvalidInput(usize),
 }
 
 impl<'a> LexError<'a> {
@@ -56,8 +56,8 @@ pub trait Lex<'a> {
     /// consumed and the next lex call will be inside the header.
     fn skip_to_next_method(&mut self) -> LexResult<'a>;
 
-    fn get_line_num(&self) -> isize {
-        -1
+    fn get_offset(&self) -> usize {
+        0
     }
 }
 
@@ -101,14 +101,10 @@ where
     R: Read,
 {
     state: LexState,
-
-    peeked: u8,
-
-    lines: isize,
-    byte_offset_in_line: isize,
-
     bytes: Bytes<BufReader<R>>,
+    offset: usize,
     buf: StrStorage<'a>,
+    peeked: u8,
 }
 
 impl<'a, R> Lexer<'a, R>
@@ -120,8 +116,7 @@ where
             peeked: 0,
             state: LexState::Normal,
             bytes: BufReader::new(reader).bytes(),
-            lines: 0,
-            byte_offset_in_line: 0,
+            offset: 0,
             buf: StrStorage::new(),
         }
     }
@@ -183,10 +178,7 @@ impl<'a, R: Read> Lex<'a> for Lexer<'a, R> {
                             };
                         }
                         _ => {
-                            return Err(LexError::InvalidInput(
-                                self.get_line_num(),
-                                self.byte_offset_in_line,
-                            ));
+                            return Err(LexError::InvalidInput(self.offset));
                         }
                     }
                 } else if let Token::ArrayTypePrefix = *into {
@@ -220,9 +212,8 @@ impl<'a, R: Read> Lex<'a> for Lexer<'a, R> {
         }
     }
 
-    #[inline]
-    fn get_line_num(&self) -> isize {
-        self.lines.checked_add(1).unwrap_or(-1)
+    fn get_offset(&self) -> usize {
+        self.offset
     }
 
     fn skip_to_next_method(&mut self) -> LexResult<'a> {
@@ -348,13 +339,9 @@ impl<'a, R: Read> Lexer<'a, R> {
                     self.push(c);
                     self.take_while(|b| b.is_ascii_digit())?;
 
-                    let reg = self.check_str(|s| Register::parse(s)).ok_or_else(|| {
-                        LexError::BadRegister(
-                            self.take_str(),
-                            self.get_line_num(),
-                            self.byte_offset_in_line,
-                        )
-                    })?;
+                    let reg = self
+                        .check_str(|s| Register::parse(s))
+                        .ok_or_else(|| LexError::BadRegister(self.take_str(), self.offset))?;
                     self.clear_buf();
                     *into = Token::Register(reg);
                 } else {
@@ -409,13 +396,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                 }
             }
             b'a'..=b'z' => self.lex_instruction_wrapper(c, into)?,
-            _ => {
-                return Err(LexError::UnexpectedByte(
-                    c,
-                    self.get_line_num(),
-                    self.byte_offset_in_line,
-                ))
-            }
+            _ => return Err(LexError::UnexpectedByte(c, self.offset)),
         }
         Ok(())
     }
@@ -492,7 +473,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                 b'D' => {
                     *into = Token::PrimitiveType(Primitive::Double);
                 }
-                _ => return Err(LexError::InvalidInput(self.lines, self.byte_offset_in_line)),
+                _ => return Err(LexError::InvalidInput(self.offset)),
             }
             if c != b'[' {
                 self.state = LexState::Annotation {
@@ -514,10 +495,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                     };
                     Ok(())
                 } else {
-                    Err(LexError::InvalidInput(
-                        self.get_line_num(),
-                        self.byte_offset_in_line,
-                    ))
+                    Err(LexError::InvalidInput(self.offset))
                 }
             }
             b'(' => {
@@ -557,10 +535,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                 if b == b'>' {
                     *into = Token::Arrow;
                 } else {
-                    return Err(LexError::InvalidInput(
-                        self.get_line_num(),
-                        self.byte_offset_in_line,
-                    ));
+                    return Err(LexError::InvalidInput(self.offset));
                 }
             }
             b'L' => {
@@ -677,7 +652,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                 Ok(())
             }
             b'L' => self.lex_class_descriptor(c, into),
-            _ => Err(LexError::InvalidInput(self.lines, self.byte_offset_in_line)),
+            _ => Err(LexError::InvalidInput(self.offset)),
         }
     }
 
@@ -704,7 +679,7 @@ impl<'a, R: Read> Lexer<'a, R> {
             return Ok(());
         }
         if is_sub {
-            return Err(LexError::InvalidInput(self.lines, self.byte_offset_in_line));
+            return Err(LexError::InvalidInput(self.offset));
         }
         let vis = match c {
             b's' => AnnotationVisibility::System,
@@ -713,11 +688,7 @@ impl<'a, R: Read> Lexer<'a, R> {
             _ => {
                 self.take_until_whitespace()?;
                 let s = self.take_str();
-                return Err(LexError::UnknownAnnotationVisibility(
-                    s,
-                    self.get_line_num(),
-                    self.byte_offset_in_line,
-                ));
+                return Err(LexError::UnknownAnnotationVisibility(s, self.offset));
             }
         };
         *into = Token::AnnotationVisibility(vis);
@@ -759,10 +730,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                         }
                         Directive::EndSubannotation => {
                             if depth == 0 {
-                                return Err(LexError::InvalidInput(
-                                    self.lines,
-                                    self.byte_offset_in_line,
-                                ));
+                                return Err(LexError::InvalidInput(self.offset));
                             }
                             self.state = LexState::Annotation {
                                 is_values: true,
@@ -771,10 +739,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                         }
                         Directive::EndAnnotation => {
                             if depth > 0 {
-                                return Err(LexError::InvalidInput(
-                                    self.lines,
-                                    self.byte_offset_in_line,
-                                ));
+                                return Err(LexError::InvalidInput(self.offset));
                             }
                             self.state = LexState::Normal;
                         }
@@ -785,10 +750,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                             };
                         }
                         _ => {
-                            return Err(LexError::InvalidInput(
-                                self.lines,
-                                self.byte_offset_in_line,
-                            ));
+                            return Err(LexError::InvalidInput(self.offset));
                         }
                     }
                 }
@@ -924,11 +886,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                     .check_str(|s| AccessFlag::maybe_parse(s))
                     .ok_or_else(|| {
                         let s = self.take_str();
-                        LexError::UnknownAccessSpec(
-                            s,
-                            self.get_line_num(),
-                            self.byte_offset_in_line,
-                        )
+                        LexError::UnknownAccessSpec(s, self.offset)
                     })?;
 
                 self.clear_buf();
@@ -968,11 +926,7 @@ impl<'a, R: Read> Lexer<'a, R> {
                     .check_str(|s| AccessFlag::maybe_parse(s))
                     .ok_or_else(|| {
                         let s = self.take_str();
-                        LexError::UnknownAccessSpec(
-                            s,
-                            self.get_line_num(),
-                            self.byte_offset_in_line,
-                        )
+                        LexError::UnknownAccessSpec(s, self.offset)
                     })?;
                 self.clear_buf();
                 *into = Token::AccessSpec(af);
@@ -1111,12 +1065,7 @@ impl<'a, R: Read> Lexer<'a, R> {
         match res {
             Err(e) => Err(LexError::IO(e.kind())),
             Ok(c) => {
-                if c == b'\n' {
-                    self.lines += 1;
-                    self.byte_offset_in_line = 0;
-                } else {
-                    self.byte_offset_in_line += 1;
-                }
+                self.offset += 1;
                 Ok(c)
             }
         }
@@ -1172,7 +1121,7 @@ impl<'a, R: Read> Lexer<'a, R> {
     }
 
     fn quoted_str(&mut self, into: &mut Token<'a>) -> LexResult<'a> {
-        let start = self.byte_offset_in_line;
+        let start = self.offset;
         loop {
             let c = self.next_byte()?;
             match c {
@@ -1187,16 +1136,10 @@ impl<'a, R: Read> Lexer<'a, R> {
                             self.push(c);
                             self.push(c2);
                         }
-                        _ => {
-                            return Err(LexError::BadStringEscape(
-                                c2 as char,
-                                self.get_line_num(),
-                                self.byte_offset_in_line,
-                            ))
-                        }
+                        _ => return Err(LexError::BadStringEscape(c2 as char, self.offset)),
                     }
                 }
-                b'\n' => return Err(LexError::UnterminatedString(self.get_line_num(), start)),
+                b'\n' => return Err(LexError::UnterminatedString(start)),
                 b'"' => break,
                 _ => self.push(c),
             }
