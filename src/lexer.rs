@@ -1230,7 +1230,7 @@ mod test {
         assert!(res.is_err(), "expected error got {:?}", res);
         let e = res.err().unwrap();
         match e {
-            LexError::UnknownDirective(d, _, _) => {
+            LexError::UnknownDirective(d, _) => {
                 assert_eq!(d, "cdoesntexist");
             }
             _ => panic!("expected UnknownDirective but got {:?}", e),
