@@ -1,4 +1,4 @@
-use std::io::{self, Bytes, BufReader, Read};
+use std::io::{self, BufReader, Bytes, Read};
 
 use thiserror::Error;
 
@@ -101,7 +101,7 @@ where
     R: Read,
 {
     state: LexState,
-    bytes: Bytes<BufReader<R>>,
+    bytes: Bytes<R>,
     offset: usize,
     buf: StrStorage<'a>,
     peeked: u8,
@@ -111,14 +111,28 @@ impl<'a, R> Lexer<'a, R>
 where
     R: Read,
 {
+    /// Create a new lexer with the given Read implementation
+    ///
+    /// Note that the type is used directly without extra buffering. Use
+    /// Lexer::new_buffered to wrap in a BufReader.
     pub fn new(reader: R) -> Self {
         Self {
             peeked: 0,
             state: LexState::Normal,
-            bytes: BufReader::new(reader).bytes(),
+            bytes: reader.bytes(),
             offset: 0,
             buf: StrStorage::new(),
         }
+    }
+}
+
+impl<'a, R> Lexer<'a, BufReader<R>>
+where
+    R: Read,
+{
+    /// Create a new Lexer by wrapping the provided Read implementation in a BufReader
+    pub fn new_buffered(reader: R) -> Self {
+        Self::new(BufReader::new(reader))
     }
 }
 
