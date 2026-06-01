@@ -71,6 +71,10 @@ bitflags! {
         const ACTION_THROW = 1 << 38;
         /// The instruction invokes another method
         const ACTION_INVOKE = 1 << 37;
+        /// The instruction retrieves a value of a static field
+        const ACTION_GETS_STATIC_FIELD = 1 << 36;
+        /// The instruction retrieves a value of an instance field
+        const ACTION_GETS_INSTANCE_FIELD = 1 << 35;
 
         /// Combination of all action related bits
         const ACTION_MASK =
@@ -78,7 +82,7 @@ bitflags! {
                 ACTION_SETS_REGISTER | ACTION_SETS_STATIC_FIELD | ACTION_SETS_INSTANCE_FIELD |
                 ACTION_SETS_ARRAY_ELEMENT | ACTION_SETS_RESULT | ACTION_FORKING_COND |
                 ACTION_UNCOND_JUMP | ACTION_SWITCH | ACTION_RETURN | ACTION_THROW |
-                ACTION_INVOKE
+                ACTION_INVOKE | ACTION_GETS_STATIC_FIELD | ACTION_GETS_STATIC_FIELD
             );
 
         /// Combination of all format related bits
@@ -269,13 +273,41 @@ ins!(
     105,
     ACTION_SETS_REGISTER | CFMT_REG_REG
 );
-ins!(INS_SGET, 106, ACTION_SETS_REGISTER | CFMT_REG_FIELD);
-ins!(INS_SGET_WIDE, 107, ACTION_SETS_REGISTER | CFMT_REG_FIELD);
-ins!(INS_SGET_OBJECT, 108, ACTION_SETS_REGISTER | CFMT_REG_FIELD);
-ins!(INS_SGET_BOOLEAN, 109, ACTION_SETS_REGISTER | CFMT_REG_FIELD);
-ins!(INS_SGET_BYTE, 110, ACTION_SETS_REGISTER | CFMT_REG_FIELD);
-ins!(INS_SGET_CHAR, 111, ACTION_SETS_REGISTER | CFMT_REG_FIELD);
-ins!(INS_SGET_SHORT, 112, ACTION_SETS_REGISTER | CFMT_REG_FIELD);
+ins!(
+    INS_SGET,
+    106,
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+);
+ins!(
+    INS_SGET_WIDE,
+    107,
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+);
+ins!(
+    INS_SGET_OBJECT,
+    108,
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+);
+ins!(
+    INS_SGET_BOOLEAN,
+    109,
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+);
+ins!(
+    INS_SGET_BYTE,
+    110,
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+);
+ins!(
+    INS_SGET_CHAR,
+    111,
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+);
+ins!(
+    INS_SGET_SHORT,
+    112,
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+);
 ins!(INS_SPUT, 113, ACTION_SETS_STATIC_FIELD | CFMT_REG_FIELD);
 ins!(
     INS_SPUT_WIDE,
@@ -310,17 +342,17 @@ ins!(
 ins!(
     INS_SGET_VOLATILE,
     120,
-    ACTION_SETS_REGISTER | CFMT_REG_FIELD
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
 );
 ins!(
     INS_SGET_WIDE_VOLATILE,
     121,
-    ACTION_SETS_REGISTER | CFMT_REG_FIELD
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
 );
 ins!(
     INS_SGET_OBJECT_VOLATILE,
     122,
-    ACTION_SETS_REGISTER | CFMT_REG_FIELD
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
 );
 ins!(
     INS_SPUT_VOLATILE,
@@ -395,36 +427,40 @@ ins!(
     139,
     ACTION_SETS_REGISTER | CFMT_REG_REG_NUM
 );
-ins!(INS_IGET, 140, ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD);
+ins!(
+    INS_IGET,
+    140,
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+);
 ins!(
     INS_IGET_WIDE,
     141,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IGET_OBJECT,
     142,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IGET_BOOLEAN,
     143,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IGET_BYTE,
     144,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IGET_CHAR,
     145,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IGET_SHORT,
     146,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IPUT,
@@ -464,17 +500,17 @@ ins!(
 ins!(
     INS_IGET_VOLATILE,
     154,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IGET_WIDE_VOLATILE,
     155,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IGET_OBJECT_VOLATILE,
     156,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
 );
 ins!(
     INS_IPUT_VOLATILE,
@@ -497,9 +533,21 @@ ins!(
     ACTION_SETS_REGISTER | CFMT_REG_REG_CLASS
 );
 ins!(INS_NEW_ARRAY, 161, ACTION_SETS_REGISTER | CFMT_REG_REG_ARR);
-ins!(INS_IGET_QUICK, 162, ACTION_SETS_REGISTER);
-ins!(INS_IGET_WIDE_QUICK, 163, ACTION_SETS_REGISTER);
-ins!(INS_IGET_OBJECT_QUICK, 164, ACTION_SETS_REGISTER);
+ins!(
+    INS_IGET_QUICK,
+    162,
+    ACTION_SETS_REGISTER | ACTION_GETS_INSTANCE_FIELD
+);
+ins!(
+    INS_IGET_WIDE_QUICK,
+    163,
+    ACTION_SETS_REGISTER | ACTION_GETS_INSTANCE_FIELD
+);
+ins!(
+    INS_IGET_OBJECT_QUICK,
+    164,
+    ACTION_SETS_REGISTER | ACTION_GETS_INSTANCE_FIELD
+);
 ins!(INS_IPUT_QUICK, 165, ACTION_SETS_INSTANCE_FIELD);
 ins!(INS_IPUT_WIDE_QUICK, 166, ACTION_SETS_INSTANCE_FIELD);
 ins!(INS_IPUT_OBJECT_QUICK, 167, ACTION_SETS_INSTANCE_FIELD);
@@ -1322,42 +1370,78 @@ impl Instruction {
     /// Return only the bits important for checking formats. This value
     /// can be compared directly to INS_FMT* constants.
     #[inline]
-    pub fn fmt(&self) -> InsBits {
+    pub fn fmt(self) -> InsBits {
         self.0 & InsBits::FMT_MASK
     }
 
     /// Returns only the bits important for checking actions. This value
     /// can be compared directly to INS_ACTION* constants.
     #[inline]
-    pub fn action(&self) -> InsBits {
+    pub fn action(self) -> InsBits {
         self.0 & InsBits::ACTION_MASK
     }
 
     /// Checks to see if the instruction sets a register.
     #[inline]
-    pub fn sets_register(&self) -> bool {
+    pub fn sets_register(self) -> bool {
         self.0.contains(InsBits::ACTION_SETS_REGISTER)
     }
 
     /// Checks to see if the instruction calls another method.
     #[inline]
-    pub fn is_call(&self) -> bool {
+    pub fn is_call(self) -> bool {
         self.0.contains(InsBits::ACTION_INVOKE)
     }
 
+    /// Checks to see if the instruction gets a static field
     #[inline]
-    pub fn is_switch(&self) -> bool {
+    pub fn gets_static_field(self) -> bool {
+        self.0.contains(InsBits::ACTION_GETS_STATIC_FIELD)
+    }
+
+    /// Checks to see if the instruction gets an instance field
+    #[inline]
+    pub fn gets_instance_field(self) -> bool {
+        self.0.contains(InsBits::ACTION_GETS_INSTANCE_FIELD)
+    }
+
+    /// Checks to see if the instruction gets a field (static or instance)
+    #[inline]
+    pub fn gets_field(self) -> bool {
+        self.gets_instance_field() || self.gets_static_field()
+    }
+
+    /// Checks to see if the instruction sets a static field
+    #[inline]
+    pub fn sets_static_field(self) -> bool {
+        self.0.contains(InsBits::ACTION_SETS_STATIC_FIELD)
+    }
+
+    /// Checks to see if the instruction sets an instance field
+    #[inline]
+    pub fn sets_instance_field(self) -> bool {
+        self.0.contains(InsBits::ACTION_SETS_INSTANCE_FIELD)
+    }
+
+    /// Checks to see if the instruction sets a field (static or instance)
+    #[inline]
+    pub fn sets_field(self) -> bool {
+        self.sets_static_field() || self.sets_instance_field()
+    }
+
+    #[inline]
+    pub fn is_switch(self) -> bool {
         self.0.contains(InsBits::ACTION_SWITCH)
     }
 
     #[inline]
-    pub fn is_cond(&self) -> bool {
+    pub fn is_cond(self) -> bool {
         self.is_forking_cond() || self.is_switch()
     }
 
     /// Checks to see if the instruction is a conditional with only two options.
     #[inline]
-    pub fn is_forking_cond(&self) -> bool {
+    pub fn is_forking_cond(self) -> bool {
         self.0.contains(InsBits::ACTION_FORKING_COND)
     }
 }
