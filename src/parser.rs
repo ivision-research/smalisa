@@ -1141,8 +1141,9 @@ mod test {
 
     macro_rules! parse_line {
         ($s:literal, $fn:expr) => {{
+            let arena = Arena::new();
             let smali_line = $s.as_bytes();
-            let lexer = Lexer::new(smali_line);
+            let lexer = Lexer::new(smali_line, &arena);
             let mut parser = Parser::new(lexer);
             let mut line = Line::Empty;
             let res = parser.parse_line_into(&mut line);
@@ -1792,6 +1793,7 @@ mod test {
 
     #[test]
     fn parse_simple_beginning() {
+        let arena = Arena::new();
         let file = r#".class private abstract La/b/C;
 .super Ljava/lang/Object;
 .source "Source.java"
@@ -1799,7 +1801,7 @@ mod test {
 .implements Lq/r/T;
 .implements Lf/o/O;"#;
 
-        let lexer = Lexer::new(file.as_bytes());
+        let lexer = Lexer::new(file.as_bytes(), &arena);
         let mut parser = Parser::new(lexer);
         assert_next_line!(
             parser,
@@ -1866,6 +1868,7 @@ mod test {
 
     #[test]
     fn parse_method_array_data() {
+        let arena = Arena::new();
         let line = r#".method public final g()Ljava/lang/String;
     .registers 2
 
@@ -1880,7 +1883,7 @@ mod test {
 .end method
 "#;
 
-        let lex = Lexer::new(line.as_bytes());
+        let lex = Lexer::new(line.as_bytes(), &arena);
         let mut parser = Parser::new(lex);
         let mut method = Method::default();
         parse_method(&mut parser, &mut method).expect("failed to parse method");
@@ -2186,6 +2189,7 @@ mod test {
     #[cfg(not(feature = "annotations"))]
     #[test]
     fn parse_class_fields() {
+        let arena = Arena::new();
         let raw = r#".class Lcom/sec/android/iaft/IAFDDiagnosis$IAFD_CONTROLINFO;
 .super Ljava/lang/Object;
 
@@ -2205,7 +2209,7 @@ mod test {
 "#;
 
         let smali_line = raw.as_bytes();
-        let lexer = Lexer::new(smali_line);
+        let lexer = Lexer::new(smali_line, &arena);
         let mut parser = Parser::new(lexer);
         super::parse_class(&mut parser).expect("failed to parse class");
     }

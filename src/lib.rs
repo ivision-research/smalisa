@@ -27,8 +27,8 @@ pub use directive::Directive;
 #[macro_use]
 pub(crate) mod utils;
 
-mod mem;
-pub use mem::DEFAULT_HEAP_SIZE;
+mod arena;
+pub use arena::Arena;
 
 mod class;
 pub use class::{Class, PackageClass};

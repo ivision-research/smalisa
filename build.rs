@@ -147,15 +147,15 @@ fn gen_string_match_recurse(
     file.write_all("_ => {\n".as_bytes()).unwrap();
     if !previous_chars.is_empty() {
         file.write_fmt(format_args!(
-            "self.buf.push_all(\"{}\".as_bytes());\n",
+            "self.push_all(\"{}\".as_bytes());\n",
             previous_chars
         ))
         .unwrap();
     }
     file.write_fmt(format_args!(
-        r#"self.buf.push(c);
+        r#"self.push(c);
 self.take_until_whitespace()?;
-let rem = self.buf.take_str_unchecked();
+let rem = self.take_str();
 return Err(LexError::Unknown{}(rem, self.offset));"#,
         token_type
     ))

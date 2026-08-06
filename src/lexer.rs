@@ -2,7 +2,7 @@ use std::io::{self, BufReader, Bytes, Read};
 
 use thiserror::Error;
 
-use crate::mem::StrStorage;
+use crate::Arena;
 use crate::{AccessFlag, Directive, Primitive, Register, Token};
 
 #[cfg(feature = "annotations")]
@@ -103,7 +103,9 @@ where
     state: LexState,
     bytes: Bytes<R>,
     offset: usize,
-    buf: StrStorage<'a>,
+    arena: &'a Arena,
+    // Scratch space for the current token we're lexing
+    scratch: Vec<u8>,
     peeked: u8,
 }
 
@@ -111,17 +113,20 @@ impl<'a, R> Lexer<'a, R>
 where
     R: Read,
 {
-    /// Create a new lexer with the given Read implementation
+    /// Create a new lexer with the given Read implementation. Strings are
+    /// allocated in `arena`, which must outlive everything lexed from this
+    /// reader.
     ///
     /// Note that the type is used directly without extra buffering. Use
     /// Lexer::new_buffered to wrap in a BufReader.
-    pub fn new(reader: R) -> Self {
+    pub fn new(reader: R, arena: &'a Arena) -> Self {
         Self {
             peeked: 0,
             state: LexState::Normal,
             bytes: reader.bytes(),
             offset: 0,
-            buf: StrStorage::new(),
+            arena,
+            scratch: Vec::new(),
         }
     }
 }
@@ -131,8 +136,8 @@ where
     R: Read,
 {
     /// Create a new Lexer by wrapping the provided Read implementation in a BufReader
-    pub fn new_buffered(reader: R) -> Self {
-        Self::new(BufReader::new(reader))
+    pub fn new_buffered(reader: R, arena: &'a Arena) -> Self {
+        Self::new(BufReader::new(reader), arena)
     }
 }
 
@@ -1113,12 +1118,17 @@ impl<'a, R: Read> Lexer<'a, R> {
 
     #[inline]
     fn push(&mut self, b: u8) {
-        self.buf.push(b)
+        self.scratch.push(b)
+    }
+
+    #[inline]
+    fn push_all(&mut self, bytes: &[u8]) {
+        self.scratch.extend_from_slice(bytes)
     }
 
     #[inline]
     fn clear_buf(&mut self) {
-        self.buf.clear()
+        self.scratch.clear()
     }
 
     #[inline]
@@ -1126,12 +1136,16 @@ impl<'a, R: Read> Lexer<'a, R> {
     where
         F: FnOnce(&str) -> T,
     {
-        self.buf.check_str(f)
+        f(&String::from_utf8_lossy(&self.scratch))
     }
 
+    /// Moves the token being lexed into the arena. Input smali is expected to be
+    /// UTF-8 and invalid characters will be mapped to the replacement.
     #[inline]
     fn take_str(&mut self) -> &'a str {
-        self.buf.take_str_unchecked()
+        let taken = self.arena.alloc_str(&String::from_utf8_lossy(&self.scratch));
+        self.scratch.clear();
+        taken
     }
 
     fn quoted_str(&mut self, into: &mut Token<'a>) -> LexResult<'a> {
@@ -1194,38 +1208,42 @@ mod test {
 
     #[test]
     fn lex_string_lit() {
+        let arena = Arena::new();
         let b = "\"\"".as_bytes();
-        let mut lex = Lexer::new(b);
+        let mut lex = Lexer::new(b, &arena);
         next_token!(lex, Token::StringLiteral(""));
         let b = "\"simplest\"".as_bytes();
-        let mut lex = Lexer::new(b);
+        let mut lex = Lexer::new(b, &arena);
         next_token!(lex, Token::StringLiteral("simplest"));
 
         let b = r#""\'escaping\"\t\n\u{0000}\b\r\\\"""#.as_bytes();
-        let mut lex = Lexer::new(b);
+        let mut lex = Lexer::new(b, &arena);
         let e = r#"'escaping"\t\n\u{0000}\b\r\\""#;
         next_token!(lex, Token::StringLiteral(e));
     }
 
     #[test]
     fn lex_ignores_comments() {
+        let arena = Arena::new();
         let b = "# Such comment\n\"string\"".as_bytes();
-        let mut lex = Lexer::new(b);
+        let mut lex = Lexer::new(b, &arena);
         next_token!(lex, Token::StringLiteral("string"));
     }
 
     #[test]
     fn lex_ignores_whitespace() {
+        let arena = Arena::new();
         let b = "\t\r\n\t           \"string\"".as_bytes();
-        let mut lex = Lexer::new(b);
+        let mut lex = Lexer::new(b, &arena);
         next_token!(lex, Token::StringLiteral("string"));
     }
 
     #[test]
     fn lex_bad_directive() {
+        let arena = Arena::new();
         let b = ".cdoesntexist\n".as_bytes();
         let mut into = Token::Unknown;
-        let mut lex = Lexer::new(b);
+        let mut lex = Lexer::new(b, &arena);
         let res = lex.lex(&mut into);
         assert!(res.is_err(), "expected error got {:?}", res);
         let e = res.err().unwrap();
@@ -1239,19 +1257,21 @@ mod test {
 
     #[test]
     fn lex_good_directive() {
+        let arena = Arena::new();
         let d = ".catch\n".as_bytes();
-        let mut lex = Lexer::new(d);
+        let mut lex = Lexer::new(d, &arena);
         next_token!(lex, Token::Directive(Directive::Catch));
 
         let d = ".catchall\n".as_bytes();
-        let mut lex = Lexer::new(d);
+        let mut lex = Lexer::new(d, &arena);
         next_token!(lex, Token::Directive(Directive::CatchAll));
     }
 
     #[test]
     fn lex_invoke_method() {
+        let arena = Arena::new();
         let d = "invoke-virtual {v2}, La/b/cd;->method()V\n".as_bytes();
-        let mut lex = Lexer::new(d);
+        let mut lex = Lexer::new(d, &arena);
         next_token!(lex, Token::Instruction(INS_INVOKE_VIRTUAL));
         next_token!(lex, Token::OpenBrace);
         next_token!(lex, Token::Register(reg!(v2)));
@@ -1266,9 +1286,10 @@ mod test {
 
     #[test]
     fn lex_types() {
+        let arena = Arena::new();
         macro_rules! lex_primitive {
             ($c:literal, $ty:ident) => {{
-                let mut lex = Lexer::new($c.as_bytes());
+                let mut lex = Lexer::new($c.as_bytes(), &arena);
                 let mut token = Token::Unknown;
                 let res = lex.lex(&mut token);
                 assert!(res.is_ok());
@@ -1285,14 +1306,15 @@ mod test {
         lex_primitive!("V", Void);
 
         let d = "Ljava/lang/String;";
-        let mut lex = Lexer::new(d.as_bytes());
+        let mut lex = Lexer::new(d.as_bytes(), &arena);
         next_token!(lex, Token::ClassDescriptor(d));
     }
 
     #[test]
     fn lex_field() {
+        let arena = Arena::new();
         let hdr = ".field public static `tick field`:La/b/c/d/E;\n".as_bytes();
-        let mut lex = Lexer::new(hdr);
+        let mut lex = Lexer::new(hdr, &arena);
         next_token!(lex, Token::Directive(Directive::Field));
         next_token!(lex, Token::AccessSpec(AccessFlag::PUBLIC));
         next_token!(lex, Token::AccessSpec(AccessFlag::STATIC));
@@ -1303,8 +1325,9 @@ mod test {
 
     #[test]
     fn lex_field_with_value() {
+        let arena = Arena::new();
         let hdr = ".field public static final FIELD:J = -0x10L\n".as_bytes();
-        let mut lex = Lexer::new(hdr);
+        let mut lex = Lexer::new(hdr, &arena);
         next_token!(lex, Token::Directive(Directive::Field));
         next_token!(lex, Token::AccessSpec(AccessFlag::PUBLIC));
         next_token!(lex, Token::AccessSpec(AccessFlag::STATIC));
@@ -1318,8 +1341,9 @@ mod test {
 
     #[test]
     fn lex_last_field() {
+        let arena = Arena::new();
         let smali = ".field static final blacklist TRANSACTION_unregisterPredictionUpdates:I = 0x6\n\n# direct methods\n".as_bytes();
-        let mut lex = Lexer::new(smali);
+        let mut lex = Lexer::new(smali, &arena);
         next_token!(lex, Token::Directive(Directive::Field));
         next_token!(lex, Token::AccessSpec(AccessFlag::STATIC));
         next_token!(lex, Token::AccessSpec(AccessFlag::FINAL));
@@ -1336,8 +1360,9 @@ mod test {
 
     #[test]
     fn lex_method_header() {
+        let arena = Arena::new();
         let hdr = ".method public static final L(JZCLjava/lang/String;[Z)V\n".as_bytes();
-        let mut lex = Lexer::new(hdr);
+        let mut lex = Lexer::new(hdr, &arena);
         next_token!(lex, Token::Directive(Directive::Method));
         next_token!(lex, Token::AccessSpec(AccessFlag::PUBLIC));
         next_token!(lex, Token::AccessSpec(AccessFlag::STATIC));
@@ -1355,7 +1380,7 @@ mod test {
         next_token!(lex, Token::PrimitiveType(Primitive::Void));
 
         let hdr = ".method constructor <init>()V\n".as_bytes();
-        let mut lex = Lexer::new(hdr);
+        let mut lex = Lexer::new(hdr, &arena);
         next_token!(lex, Token::Directive(Directive::Method));
         next_token!(lex, Token::AccessSpec(AccessFlag::CONSTRUCTOR));
         next_token!(lex, Token::SimpleName("<init>"));
@@ -1365,7 +1390,7 @@ mod test {
         next_token!(lex, Token::PrimitiveType(Primitive::Void));
 
         let hdr = ".method constructor `a method`()V\n".as_bytes();
-        let mut lex = Lexer::new(hdr);
+        let mut lex = Lexer::new(hdr, &arena);
         next_token!(lex, Token::Directive(Directive::Method));
         next_token!(lex, Token::AccessSpec(AccessFlag::CONSTRUCTOR));
         next_token!(lex, Token::SimpleName("a method"));
@@ -1377,71 +1402,74 @@ mod test {
 
     #[test]
     fn lex_char() {
+        let arena = Arena::new();
         let v = "'b'";
-        let mut lex = Lexer::new(v.as_bytes());
+        let mut lex = Lexer::new(v.as_bytes(), &arena);
         next_token!(lex, Token::CharLiteral("b"));
         let v = "'\\u2764'";
-        let mut lex = Lexer::new(v.as_bytes());
+        let mut lex = Lexer::new(v.as_bytes(), &arena);
         next_token!(lex, Token::CharLiteral("\\u2764"));
     }
 
     #[test]
     fn lex_numeric() {
+        let arena = Arena::new();
         let num = "-10\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("-10"));
 
         let num = "10\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("10"));
 
         let num = "0xf\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("0xf"));
 
         let num = "-0xf\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("-0xf"));
 
         let num = "-10t\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("-10t"));
 
         let num = "10t\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("10t"));
 
         let num = "-0xft\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("-0xft"));
 
         let num = "0xft\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("0xft"));
 
         let num = "-1000000000L\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("-1000000000L"));
 
         let num = "1000000000L\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("1000000000L"));
 
         let num = "0x40000000    # 2.0f\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("2.0f"));
 
         let num = "0x40800000    # -1.0f\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("-1.0f"));
 
         let num = "0x40800000    # Float.NaN\n";
-        let mut lex = Lexer::new(num.as_bytes());
+        let mut lex = Lexer::new(num.as_bytes(), &arena);
         next_token!(lex, Token::NumericLiteral("Float.NaN"));
     }
 
     #[test]
     fn lex_sswitch_entry() {
+        let arena = Arena::new();
         let sswitch = r#".sparse-switch
         -0x7d14f855 -> :sswitch_3c7
         -0x304ed112 -> :sswitch_388
@@ -1449,7 +1477,7 @@ mod test {
         0x6f08f706 -> :sswitch_2fd
     .end sparse-switch
 "#;
-        let mut lex = Lexer::new(sswitch.as_bytes());
+        let mut lex = Lexer::new(sswitch.as_bytes(), &arena);
         macro_rules! sswitch_entry {
             ($num:literal, $label:literal) => {
                 next_token!(lex, Token::NumericLiteral($num));
@@ -1469,6 +1497,7 @@ mod test {
     #[cfg(not(feature = "annotations"))]
     #[test]
     fn lex_skip_field_annotations() {
+        let arena = Arena::new();
         let lines = r#"
 # instance fields
 .field private final blacklist mCache:Ljava/util/concurrent/ConcurrentHashMap;
@@ -1482,7 +1511,7 @@ mod test {
     .end annotation
 .end field
 "#;
-        let mut lex = Lexer::new(lines.as_bytes());
+        let mut lex = Lexer::new(lines.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Field));
         next_token!(lex, Token::AccessSpec(AccessFlag::PRIVATE));
         next_token!(lex, Token::AccessSpec(AccessFlag::FINAL));
@@ -1513,7 +1542,7 @@ mod test {
 .end annotation
 .param p1, "cool"
 "#;
-        let mut lex = Lexer::new(lines.as_bytes());
+        let mut lex = Lexer::new(lines.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Method));
         next_token!(lex, Token::AccessSpec(AccessFlag::PUBLIC));
         next_token!(lex, Token::SimpleName("m"));
@@ -1532,7 +1561,8 @@ mod test {
     }
 .end annotation
 "#;
-        let mut lex = Lexer::new(annotation.as_bytes());
+        let arena = Arena::new();
+        let mut lex = Lexer::new(annotation.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Annotation));
         next_token!(
             lex,
@@ -1556,6 +1586,7 @@ mod test {
     #[cfg(feature = "annotations")]
     #[test]
     fn lex_annotation_2() {
+        let arena = Arena::new();
         let annotation = r#".annotation system Ldalvik/annotation/AnnotationDefault;
     value = .subannotation Lorg/intellij/lang/annotations/MagicConstant;
         flags = {}
@@ -1566,7 +1597,7 @@ mod test {
     .end subannotation
 .end annotation
 "#;
-        let mut lex = Lexer::new(annotation.as_bytes());
+        let mut lex = Lexer::new(annotation.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Annotation));
         next_token!(
             lex,
@@ -1655,7 +1686,8 @@ mod test {
 .end annotation
 "#;
 
-        let mut lex = Lexer::new(annotation.as_bytes());
+        let arena = Arena::new();
+        let mut lex = Lexer::new(annotation.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Annotation));
         next_token!(
             lex,
@@ -1757,7 +1789,8 @@ mod test {
     .end annotation
     "#;
 
-        let mut lex = Lexer::new(annotation.as_bytes());
+        let arena = Arena::new();
+        let mut lex = Lexer::new(annotation.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Annotation));
         next_token!(
             lex,
@@ -1806,11 +1839,12 @@ mod test {
     #[cfg(feature = "annotations")]
     #[test]
     fn lex_annotation_5() {
+        let arena = Arena::new();
         let annotation = r#".annotation system Ldalvik/annotation/EnclosingMethod;
         value = Lokhttp3/OkHttpClient$Builder;->-addInterceptor(Lkotlin/jvm/functions/Function1;)Lokhttp3/OkHttpClient$Builder;
 .end annotation
 "#;
-        let mut lex = Lexer::new(annotation.as_bytes());
+        let mut lex = Lexer::new(annotation.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Annotation));
         next_token!(
             lex,
@@ -1839,11 +1873,12 @@ mod test {
     #[cfg(feature = "annotations")]
     #[test]
     fn lex_annotation_6() {
+        let arena = Arena::new();
         let annotation = r#".annotation runtime Lcom/oracle/svm/core/annotate/RecomputeFieldValue;
         declClass = [B
     .end annotation
 "#;
-        let mut lex = Lexer::new(annotation.as_bytes());
+        let mut lex = Lexer::new(annotation.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Annotation));
         next_token!(
             lex,
@@ -1867,7 +1902,8 @@ mod test {
         {}
     }
 .end annotation"#;
-        let mut lex = Lexer::new(annotation.as_bytes());
+        let arena = Arena::new();
+        let mut lex = Lexer::new(annotation.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Annotation));
         next_token!(
             lex,
@@ -1884,9 +1920,10 @@ mod test {
 
     #[test]
     fn lex_method_name_starts_with_neg() {
+        let arena = Arena::new();
         let method = r#".method static synthetic -access$100(La/b/C;)[[Ljava/lang/String;
 "#;
-        let mut lex = Lexer::new(method.as_bytes());
+        let mut lex = Lexer::new(method.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Method));
         next_token!(lex, Token::AccessSpec(AccessFlag::STATIC));
         next_token!(lex, Token::AccessSpec(AccessFlag::SYNTHETIC));
@@ -1899,11 +1936,12 @@ mod test {
 
     #[test]
     fn test_lex_escaped_char() {
+        let arena = Arena::new();
         let raw = r#".field static final APOSTROPHE:C = '\''
 
 .field static final BACKSLASH:C = '\\'
 "#;
-        let mut lex = Lexer::new(raw.as_bytes());
+        let mut lex = Lexer::new(raw.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Field));
         next_token!(lex, Token::AccessSpec(AccessFlag::STATIC));
         next_token!(lex, Token::AccessSpec(AccessFlag::FINAL));
@@ -1925,6 +1963,7 @@ mod test {
 
     #[test]
     fn lex_method() {
+        let arena = Arena::new();
         let method = r#".method static synthetic access$100(La/b/C;)[[Ljava/lang/String;
         .registers 1
 
@@ -1933,7 +1972,7 @@ mod test {
     return-object p0
 .end method"#;
 
-        let mut lex = Lexer::new(method.as_bytes());
+        let mut lex = Lexer::new(method.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Method));
         next_token!(lex, Token::AccessSpec(AccessFlag::STATIC));
         next_token!(lex, Token::AccessSpec(AccessFlag::SYNTHETIC));
@@ -1967,7 +2006,7 @@ mod test {
 
 .end method"#;
 
-        let mut lex = Lexer::new(method.as_bytes());
+        let mut lex = Lexer::new(method.as_bytes(), &arena);
         next_token!(lex, Token::Directive(Directive::Method));
         next_token!(lex, Token::AccessSpec(AccessFlag::FINAL));
         next_token!(lex, Token::SimpleName("tick method"));
