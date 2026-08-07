@@ -9,6 +9,7 @@ macro_rules! bit_concat {
 }
 
 bitflags! {
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct AccessFlag: u64 {
         const UNSET                   = 0;

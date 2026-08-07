@@ -4,6 +4,7 @@ use crate::extra::parse_numeric;
 use crate::Token;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum NumericLiteral {
     Float(f32),
     Double(f64),
@@ -27,6 +28,7 @@ impl<'a> From<NumericLiteral> for Literal<'a> {
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum Literal<'a> {
     Null,
     Char(char),
@@ -58,6 +60,7 @@ impl<'a> fmt::Display for Literal<'a> {
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum RawLiteral<'a> {
     Unset,
     Null,

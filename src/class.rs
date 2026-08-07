@@ -4,6 +4,7 @@ use crate::{AccessFlag, Annotation, Field, Method};
 
 /// Represents a fully parsed class.
 #[derive(Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Class<'a> {
     pub access: AccessFlag,
     pub name: &'a str,
@@ -15,6 +16,7 @@ pub struct Class<'a> {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct PackageClass<'a> {
     pub package: &'a str,
     pub name: &'a str,

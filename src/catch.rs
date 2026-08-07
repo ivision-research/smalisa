@@ -1,12 +1,15 @@
 use crate::{Label, RawLabel};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum Catch<'a> {
+    #[cfg_attr(feature = "serde", serde(borrow))]
     Named(NamedCatch<'a>),
     All(CatchAll),
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NamedCatch<'a> {
     pub class: &'a str,
     pub start_label: Label,
@@ -15,10 +18,14 @@ pub struct NamedCatch<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RawNamedCatch<'a> {
     pub class: &'a str,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub start_label: RawLabel<'a>,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub end_label: RawLabel<'a>,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub dest_label: RawLabel<'a>,
 }
 
@@ -57,6 +64,7 @@ impl<'a> RawNamedCatch<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct CatchAll {
     pub start_label: Label,
     pub end_label: Label,
@@ -64,9 +72,13 @@ pub struct CatchAll {
 }
 
 #[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RawCatchAll<'a> {
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub start_label: RawLabel<'a>,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub end_label: RawLabel<'a>,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub dest_label: RawLabel<'a>,
 }
 

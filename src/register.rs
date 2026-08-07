@@ -4,6 +4,7 @@ const PARAM_BIT: usize = 1 << (std::mem::size_of::<usize>() - 1);
 const NUM_BIT_MASK: usize = !PARAM_BIT;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Register(usize);
 
 impl Default for Register {
@@ -58,6 +59,7 @@ impl fmt::Display for Register {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RegisterRange {
     pub(crate) first: Register,
     pub(crate) last: Register,
@@ -107,6 +109,7 @@ pub const MAX_VAR_REGISTERS: usize = 5;
 /// RegisterArray is for a variable number of registers. This differents from
 /// the register range in that they don't have to be sequential.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RegisterArray {
     registers: [Register; MAX_VAR_REGISTERS],
     i: usize,
@@ -176,6 +179,7 @@ impl fmt::Display for RegisterArray {
 /// Unlike [VarRegister] this includes registers that don't appear in the smali directly, such as
 /// with wide instructions naming `v0` but using `v0` and `v1.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum RegisterCollection {
     /// Fixed register list that also makes the implict ones explicit
     Fixed {
@@ -297,6 +301,7 @@ impl Iterator for RegisterCollectionIter {
 impl ExactSizeIterator for RegisterCollectionIter {}
 
 #[derive(Debug, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum VarRegister {
     Empty,
     Range(RegisterRange),

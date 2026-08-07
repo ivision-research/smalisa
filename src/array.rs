@@ -2,6 +2,7 @@ use crate::extra::{i8_to_u8, parse_numeric};
 use crate::{NumericLiteral, RawLabel};
 
 #[derive(PartialEq, Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ArrayData {
     pub label_id: u32,
     pub data_size: usize,
@@ -13,6 +14,7 @@ impl ArrayData {
 }
 
 #[derive(PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RawArrayData<'a> {
     pub label: RawLabel<'a>,
     pub data_size: &'a str,

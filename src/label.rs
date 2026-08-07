@@ -3,6 +3,7 @@ use std::ops::Deref;
 
 /// A raw label with the : removed.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RawLabel<'a>(&'a str);
 
 impl<'a> From<&'a str> for RawLabel<'a> {
@@ -72,6 +73,7 @@ impl<'a> RawLabel<'a> {
 ///
 /// This enum simply removes the string part and parses the hex digit.
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum Label {
     Unset,
     Cond(u32),

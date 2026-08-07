@@ -5,6 +5,7 @@ use std::collections::HashMap;
 /// All switch data parses into the same type which is just a map of
 /// label -> data.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SwitchData {
     pub label_id: u32,
     map: HashMap<Label, isize>,
@@ -41,13 +42,17 @@ impl SwitchData {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RawSwitchPair<'a> {
     pub num: &'a str,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub label: RawLabel<'a>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RawSparseSwitchData<'a> {
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub label: RawLabel<'a>,
     pub data: Vec<RawSwitchPair<'a>>,
 }
@@ -63,7 +68,9 @@ impl<'a> RawSparseSwitchData<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RawPackedSwitchData<'a> {
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub label: RawLabel<'a>,
     pub start: &'a str,
     pub labels: Vec<RawLabel<'a>>,

@@ -5,8 +5,10 @@ use crate::{
 };
 
 #[derive(PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Invocation<'a> {
     ins: Instruction,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     args: InvArgs<'a>,
 }
 
@@ -182,6 +184,7 @@ fn push(regs: &mut [Register; MAX_FIXED_REGISTERS], len: &mut usize, reg: Regist
 }
 
 #[derive(PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum InvArgs<'a> {
     Bare,
 

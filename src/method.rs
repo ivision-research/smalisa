@@ -82,12 +82,15 @@ pub fn parse_method_args<'a>(args: &'a str) -> Result<Vec<Type<'a>>, &'a str> {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MethodRef<'a> {
     pub class: &'a str,
     pub name: &'a str,
     pub args: &'a str,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub return_type: Type<'a>,
 
+    #[cfg_attr(feature = "serde", serde(skip))]
     input_params: Option<Vec<Type<'a>>>,
 
     pub(crate) class_array_dim: usize,
@@ -153,12 +156,14 @@ impl<'a> MethodRef<'a> {
 }
 
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MethodHeader<'a> {
     pub name: &'a str,
     pub access: AccessFlag,
     pub args: &'a str,
     pub return_type: Type<'a>,
 
+    #[cfg_attr(feature = "serde", serde(skip))]
     input_params: Option<Vec<Type<'a>>>,
 }
 
@@ -207,10 +212,13 @@ impl<'a> MethodHeader<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum MethodLine<'a> {
     Unset,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     Instruction(Invocation<'a>),
     LabelDef(Label),
+    #[cfg_attr(feature = "serde", serde(borrow))]
     Catch(Catch<'a>),
 }
 
@@ -223,9 +231,12 @@ impl<'a> Default for MethodLine<'a> {
 
 /// Represents a fully parsed method.
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Method<'a> {
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub header: MethodHeader<'a>,
     pub annotations: SmallVec<[Annotation<'a>; 4]>,
+    #[cfg_attr(feature = "serde", serde(borrow))]
     pub param_annotations: Option<Vec<ParamAnnotations<'a>>>,
 
     pub lines: Vec<MethodLine<'a>>,

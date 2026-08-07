@@ -4,6 +4,7 @@ use crate::{Enum, MethodRef, Primitive, Register, Type};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum AnnotationVisibility {
     Unset,
     Runtime,
@@ -18,12 +19,17 @@ impl Default for AnnotationVisibility {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum AnnotationValue<'a> {
+    #[cfg_attr(feature = "serde", serde(borrow))]
     Lit(RawLiteral<'a>),
     List(Vec<AnnotationValue<'a>>),
     Subannotation(Annotation<'a>),
+    #[cfg_attr(feature = "serde", serde(borrow))]
     Enum(Enum<'a>),
+    #[cfg_attr(feature = "serde", serde(borrow))]
     Type(Type<'a>),
+    #[cfg_attr(feature = "serde", serde(borrow))]
     Method(MethodRef<'a>),
 }
 
@@ -70,6 +76,7 @@ impl<'a> From<Enum<'a>> for AnnotationValue<'a> {
 }
 
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ParamAnnotations<'a> {
     pub register: Register,
     pub name: &'a str,
@@ -98,6 +105,7 @@ impl<'a> PartialEq for ParamAnnotations<'a> {
 }
 
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Annotation<'a> {
     pub class: &'a str,
     pub visibility: AnnotationVisibility,

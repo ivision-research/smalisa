@@ -144,6 +144,27 @@ bitflags! {
 #[derive(PartialEq, Eq, Copy, Clone)]
 pub struct Instruction(pub(crate) InsBits);
 
+// Note that these have to be manual because we stuff extra data into the low bits
+#[cfg(any(feature = "serde"))]
+impl<'de> serde::Deserialize<'de> for Instruction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::from_raw(u64::deserialize(deserializer)?))
+    }
+}
+
+#[cfg(any(feature = "serde"))]
+impl serde::Serialize for Instruction {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.raw().serialize(serializer)
+    }
+}
+
 macro_rules! ins {
     ($name:ident, $id:literal) => {
         pub const $name: Instruction = Instruction(
@@ -1878,5 +1899,15 @@ impl Instruction {
 impl fmt::Debug for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_string())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn raw_roundtrip() {
+        let val = INS_SUB_LONG_2ADDR;
+        assert_eq!(val, Instruction::from_raw(val.raw()));
     }
 }

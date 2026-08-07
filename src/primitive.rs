@@ -1,6 +1,7 @@
 use std::{fmt, hash::Hash};
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum Primitive {
     Int,
     Long,
