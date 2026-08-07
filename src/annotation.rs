@@ -109,8 +109,7 @@ impl<'a> PartialEq for Annotation<'a> {
         if ptr_eq(self, other) {
             return true;
         }
-        if self.class != other.class
-            || self.visibility != other.visibility {
+        if self.class != other.class || self.visibility != other.visibility {
             return false;
         }
         if self.parameters.len() != other.parameters.len() {
@@ -119,8 +118,10 @@ impl<'a> PartialEq for Annotation<'a> {
         for k in self.parameters.keys() {
             match other.parameters.get(k) {
                 None => return false,
-                Some(v) => if self.parameters.get(k).unwrap() != v {
-                    return false;
+                Some(v) => {
+                    if self.parameters.get(k).unwrap() != v {
+                        return false;
+                    }
                 }
             }
         }

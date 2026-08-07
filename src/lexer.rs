@@ -1143,7 +1143,9 @@ impl<'a, R: Read> Lexer<'a, R> {
     /// UTF-8 and invalid characters will be mapped to the replacement.
     #[inline]
     fn take_str(&mut self) -> &'a str {
-        let taken = self.arena.alloc_str(&String::from_utf8_lossy(&self.scratch));
+        let taken = self
+            .arena
+            .alloc_str(&String::from_utf8_lossy(&self.scratch));
         self.scratch.clear();
         taken
     }

@@ -16,7 +16,10 @@ mod line;
 pub use line::Line;
 
 mod register;
-pub use register::{Register, RegisterArray, RegisterRange, VarRegister};
+pub use register::{
+    Register, RegisterArray, RegisterRange, RegisterCollection, RegisterCollectionIter, VarRegister,
+    MAX_FIXED_REGISTERS,
+};
 
 mod access;
 pub use access::AccessFlag;

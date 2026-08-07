@@ -1,4 +1,5 @@
 use std::fmt;
+use std::hash::Hash;
 use std::ops::Deref;
 
 macro_rules! mask {
@@ -18,10 +19,13 @@ bitflags! {
         const FMT_LABEL = 1 << 63;
         /// The instruction takes at least 1 register
         const FMT_REG_A = 1 << 62;
+        const FMT_REG_ONE = 1 << 62;
         /// The instruction takes at least 2 registers
         const FMT_REG_B = 1 << 61;
+        const FMT_REG_TWO = 1 << 61;
         /// The instruction takes 3 registesrs
         const FMT_REG_C = 1 << 60;
+        const FMT_REG_THREE = 1 << 60;
         /// The instruction takes a variable number of registers
         const FMT_VAR_REG = 1 << 59;
         /// The instruction uses a field
@@ -75,6 +79,22 @@ bitflags! {
         const ACTION_GETS_STATIC_FIELD = 1 << 36;
         /// The instruction retrieves a value of an instance field
         const ACTION_GETS_INSTANCE_FIELD = 1 << 35;
+        /// The instruction retrieves a value from an array
+        const ACTION_GETS_ARRAY_ELEMENT = 1 << 34;
+        /// The instruction is a move instruction variant
+        const ACTION_MOVE = 1 << 33;
+        /// The instruction is a move result instruction variant
+        const ACTION_MOVE_RESULT = 1 << 32;
+        /// The first register is an inout: read before it is written. The
+        /// /2addr forms. Only ever set alongside ACTION_SETS_REGISTER.
+        const ACTION_INOUT = 1 << 31;
+
+        /// The first register is an implicit pair (v0 means v0 and v1)
+        const PAIR_FIRST = 1 << 30;
+        /// The second register is an implicit pair (v0 means v0 and v1)
+        const PAIR_SECOND = 1 << 29;
+        /// The third register is an implicit pair (v0 means v0 and v1)
+        const PAIR_THIRD = 1 << 28;
 
         /// Combination of all action related bits
         const ACTION_MASK =
@@ -82,7 +102,9 @@ bitflags! {
                 ACTION_SETS_REGISTER | ACTION_SETS_STATIC_FIELD | ACTION_SETS_INSTANCE_FIELD |
                 ACTION_SETS_ARRAY_ELEMENT | ACTION_SETS_RESULT | ACTION_FORKING_COND |
                 ACTION_UNCOND_JUMP | ACTION_SWITCH | ACTION_RETURN | ACTION_THROW |
-                ACTION_INVOKE | ACTION_GETS_STATIC_FIELD | ACTION_GETS_STATIC_FIELD
+                ACTION_INVOKE | ACTION_GETS_STATIC_FIELD | ACTION_GETS_INSTANCE_FIELD |
+                ACTION_GETS_ARRAY_ELEMENT | ACTION_MOVE | ACTION_MOVE_RESULT |
+                ACTION_INOUT
             );
 
         /// Combination of all format related bits
@@ -91,6 +113,10 @@ bitflags! {
             FMT_FIELD | FMT_CLASS | FMT_ARR | FMT_METHOD | FMT_NUM | FMT_STR |
             FMT_CATCH | FMT_SWITCH | FMT_BARE | FMT_POLYMORPHIC | FMT_INVOKE_CUSTOM
         );
+
+        /// Combination of all register pair bits. Deliberately not part of
+        /// FMT_MASK so that fmt() keeps comparing equal to the CFMT_* shapes.
+        const PAIR_MASK = mask!(PAIR_FIRST | PAIR_SECOND | PAIR_THIRD);
 
         const CFMT_BARE = Self::FMT_BARE.bits();
         const CFMT_REG = Self::FMT_REG_A.bits();
@@ -148,7 +174,7 @@ ins!(INS_GOTO_16, 9, ACTION_UNCOND_JUMP | CFMT_LABEL);
 ins!(INS_GOTO_32, 10, ACTION_UNCOND_JUMP | CFMT_LABEL);
 ins!(INS_RETURN, 11, ACTION_RETURN | CFMT_REG);
 ins!(INS_RETURN_VOID, 12, ACTION_RETURN | CFMT_BARE);
-ins!(INS_RETURN_WIDE, 13, ACTION_RETURN | CFMT_REG);
+ins!(INS_RETURN_WIDE, 13, ACTION_RETURN | CFMT_REG | PAIR_FIRST);
 ins!(INS_RETURN_OBJECT, 14, ACTION_RETURN | CFMT_REG);
 ins!(INS_RETURN_VOID_BARRIER, 15, ACTION_RETURN | CFMT_BARE);
 ins!(INS_RETURN_VOID_NO_BARRIER, 16, ACTION_RETURN | CFMT_BARE);
@@ -156,14 +182,26 @@ ins!(INS_NOP, 17, CFMT_BARE);
 ins!(INS_CONST, 18, ACTION_SETS_REGISTER | CFMT_REG_NUM);
 ins!(INS_CONST_4, 19, ACTION_SETS_REGISTER | CFMT_REG_NUM);
 ins!(INS_CONST_16, 20, ACTION_SETS_REGISTER | CFMT_REG_NUM);
-ins!(INS_CONST_WIDE, 21, ACTION_SETS_REGISTER | CFMT_REG_NUM);
-ins!(INS_CONST_WIDE_16, 22, ACTION_SETS_REGISTER | CFMT_REG_NUM);
-ins!(INS_CONST_WIDE_32, 23, ACTION_SETS_REGISTER | CFMT_REG_NUM);
+ins!(
+    INS_CONST_WIDE,
+    21,
+    ACTION_SETS_REGISTER | CFMT_REG_NUM | PAIR_FIRST
+);
+ins!(
+    INS_CONST_WIDE_16,
+    22,
+    ACTION_SETS_REGISTER | CFMT_REG_NUM | PAIR_FIRST
+);
+ins!(
+    INS_CONST_WIDE_32,
+    23,
+    ACTION_SETS_REGISTER | CFMT_REG_NUM | PAIR_FIRST
+);
 ins!(INS_CONST_HIGH16, 24, ACTION_SETS_REGISTER | CFMT_REG_NUM);
 ins!(
     INS_CONST_WIDE_HIGH16,
     25,
-    ACTION_SETS_REGISTER | CFMT_REG_NUM
+    ACTION_SETS_REGISTER | CFMT_REG_NUM | PAIR_FIRST
 );
 ins!(INS_CONST_STRING, 26, ACTION_SETS_REGISTER | CFMT_REG_STR);
 ins!(
@@ -185,93 +223,273 @@ ins!(INS_IF_LT, 38, ACTION_FORKING_COND | CFMT_REG_REG_LABEL);
 ins!(INS_IF_GE, 39, ACTION_FORKING_COND | CFMT_REG_REG_LABEL);
 ins!(INS_IF_GT, 40, ACTION_FORKING_COND | CFMT_REG_REG_LABEL);
 ins!(INS_IF_LE, 41, ACTION_FORKING_COND | CFMT_REG_REG_LABEL);
-ins!(INS_MOVE_RESULT, 42, ACTION_SETS_REGISTER | CFMT_REG);
-ins!(INS_MOVE_RESULT_WIDE, 43, ACTION_SETS_REGISTER | CFMT_REG);
-ins!(INS_MOVE_RESULT_OBJECT, 44, ACTION_SETS_REGISTER | CFMT_REG);
+ins!(
+    INS_MOVE_RESULT,
+    42,
+    ACTION_SETS_REGISTER | ACTION_MOVE_RESULT | CFMT_REG
+);
+ins!(
+    INS_MOVE_RESULT_WIDE,
+    43,
+    ACTION_SETS_REGISTER | ACTION_MOVE_RESULT | CFMT_REG | PAIR_FIRST
+);
+ins!(
+    INS_MOVE_RESULT_OBJECT,
+    44,
+    ACTION_SETS_REGISTER | ACTION_MOVE_RESULT | CFMT_REG
+);
 ins!(INS_MOVE_EXCEPTION, 45, ACTION_SETS_REGISTER | CFMT_REG);
 ins!(INS_MONITOR_ENTER, 46, CFMT_REG);
 ins!(INS_MONITOR_EXIT, 47, CFMT_REG);
 ins!(INS_THROW, 48, ACTION_THROW | CFMT_REG);
-ins!(INS_MOVE, 49, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_MOVE_WIDE, 50, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_MOVE_OBJECT, 51, ACTION_SETS_REGISTER | CFMT_REG_REG);
+ins!(
+    INS_MOVE,
+    49,
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG
+);
+ins!(
+    INS_MOVE_WIDE,
+    50,
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
+ins!(
+    INS_MOVE_OBJECT,
+    51,
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG
+);
 ins!(INS_ARRAY_LENGTH, 52, ACTION_SETS_REGISTER | CFMT_REG_REG);
 ins!(INS_NEG_INT, 53, ACTION_SETS_REGISTER | CFMT_REG_REG);
 ins!(INS_NOT_INT, 54, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_NEG_LONG, 55, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_NOT_LONG, 56, ACTION_SETS_REGISTER | CFMT_REG_REG);
+ins!(
+    INS_NEG_LONG,
+    55,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
+ins!(
+    INS_NOT_LONG,
+    56,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
 ins!(INS_NEG_FLOAT, 57, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_NEG_DOUBLE, 58, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_INT_TO_LONG, 59, ACTION_SETS_REGISTER | CFMT_REG_REG);
+ins!(
+    INS_NEG_DOUBLE,
+    58,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
+ins!(
+    INS_INT_TO_LONG,
+    59,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST
+);
 ins!(INS_INT_TO_FLOAT, 60, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_INT_TO_DOUBLE, 61, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_LONG_TO_INT, 62, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_LONG_TO_FLOAT, 63, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_LONG_TO_DOUBLE, 64, ACTION_SETS_REGISTER | CFMT_REG_REG);
+ins!(
+    INS_INT_TO_DOUBLE,
+    61,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST
+);
+ins!(
+    INS_LONG_TO_INT,
+    62,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_SECOND
+);
+ins!(
+    INS_LONG_TO_FLOAT,
+    63,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_SECOND
+);
+ins!(
+    INS_LONG_TO_DOUBLE,
+    64,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
 ins!(INS_FLOAT_TO_INT, 65, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_FLOAT_TO_LONG, 66, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_FLOAT_TO_DOUBLE, 67, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_DOUBLE_TO_INT, 68, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_DOUBLE_TO_LONG, 69, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_DOUBLE_TO_FLOAT, 70, ACTION_SETS_REGISTER | CFMT_REG_REG);
+ins!(
+    INS_FLOAT_TO_LONG,
+    66,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST
+);
+ins!(
+    INS_FLOAT_TO_DOUBLE,
+    67,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST
+);
+ins!(
+    INS_DOUBLE_TO_INT,
+    68,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_SECOND
+);
+ins!(
+    INS_DOUBLE_TO_LONG,
+    69,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
+ins!(
+    INS_DOUBLE_TO_FLOAT,
+    70,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_SECOND
+);
 ins!(INS_INT_TO_BYTE, 71, ACTION_SETS_REGISTER | CFMT_REG_REG);
 ins!(INS_INT_TO_CHAR, 72, ACTION_SETS_REGISTER | CFMT_REG_REG);
 ins!(INS_INT_TO_SHORT, 73, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_ADD_INT_2ADDR, 74, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_SUB_INT_2ADDR, 75, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_MUL_INT_2ADDR, 76, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_DIV_INT_2ADDR, 77, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_REM_INT_2ADDR, 78, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_AND_INT_2ADDR, 79, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_OR_INT_2ADDR, 80, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_XOR_INT_2ADDR, 81, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_SHL_INT_2ADDR, 82, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_SHR_INT_2ADDR, 83, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_USHR_INT_2ADDR, 84, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_ADD_LONG_2ADDR, 85, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_SUB_LONG_2ADDR, 86, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_MUL_LONG_2ADDR, 87, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_DIV_LONG_2ADDR, 88, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_REM_LONG_2ADDR, 89, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_AND_LONG_2ADDR, 90, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_OR_LONG_2ADDR, 91, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_XOR_LONG_2ADDR, 92, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_SHL_LONG_2ADDR, 93, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_SHR_LONG_2ADDR, 94, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_USHR_LONG_2ADDR, 95, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_ADD_FLOAT_2ADDR, 96, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_SUB_FLOAT_2ADDR, 97, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_MUL_FLOAT_2ADDR, 98, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_DIV_FLOAT_2ADDR, 99, ACTION_SETS_REGISTER | CFMT_REG_REG);
+ins!(
+    INS_ADD_INT_2ADDR,
+    74,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_SUB_INT_2ADDR,
+    75,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_MUL_INT_2ADDR,
+    76,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_DIV_INT_2ADDR,
+    77,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_REM_INT_2ADDR,
+    78,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_AND_INT_2ADDR,
+    79,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_OR_INT_2ADDR,
+    80,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_XOR_INT_2ADDR,
+    81,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_SHL_INT_2ADDR,
+    82,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_SHR_INT_2ADDR,
+    83,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_USHR_INT_2ADDR,
+    84,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_ADD_LONG_2ADDR,
+    85,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
+);
+ins!(
+    INS_SUB_LONG_2ADDR,
+    86,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
+);
+ins!(
+    INS_MUL_LONG_2ADDR,
+    87,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
+);
+ins!(
+    INS_DIV_LONG_2ADDR,
+    88,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
+);
+ins!(
+    INS_REM_LONG_2ADDR,
+    89,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
+);
+ins!(
+    INS_AND_LONG_2ADDR,
+    90,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
+);
+ins!(
+    INS_OR_LONG_2ADDR,
+    91,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
+);
+ins!(
+    INS_XOR_LONG_2ADDR,
+    92,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
+);
+ins!(
+    INS_SHL_LONG_2ADDR,
+    93,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | ACTION_INOUT
+);
+ins!(
+    INS_SHR_LONG_2ADDR,
+    94,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | ACTION_INOUT
+);
+ins!(
+    INS_USHR_LONG_2ADDR,
+    95,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | ACTION_INOUT
+);
+ins!(
+    INS_ADD_FLOAT_2ADDR,
+    96,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_SUB_FLOAT_2ADDR,
+    97,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_MUL_FLOAT_2ADDR,
+    98,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
+ins!(
+    INS_DIV_FLOAT_2ADDR,
+    99,
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
+);
 ins!(
     INS_REM_FLOAT_2ADDR,
     100,
-    ACTION_SETS_REGISTER | CFMT_REG_REG
+    ACTION_SETS_REGISTER | CFMT_REG_REG | ACTION_INOUT
 );
 ins!(
     INS_ADD_DOUBLE_2ADDR,
     101,
-    ACTION_SETS_REGISTER | CFMT_REG_REG
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
 );
 ins!(
     INS_SUB_DOUBLE_2ADDR,
     102,
-    ACTION_SETS_REGISTER | CFMT_REG_REG
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
 );
 ins!(
     INS_MUL_DOUBLE_2ADDR,
     103,
-    ACTION_SETS_REGISTER | CFMT_REG_REG
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
 );
 ins!(
     INS_DIV_DOUBLE_2ADDR,
     104,
-    ACTION_SETS_REGISTER | CFMT_REG_REG
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
 );
 ins!(
     INS_REM_DOUBLE_2ADDR,
     105,
-    ACTION_SETS_REGISTER | CFMT_REG_REG
+    ACTION_SETS_REGISTER | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND | ACTION_INOUT
 );
 ins!(
     INS_SGET,
@@ -281,7 +499,7 @@ ins!(
 ins!(
     INS_SGET_WIDE,
     107,
-    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD | PAIR_FIRST
 );
 ins!(
     INS_SGET_OBJECT,
@@ -312,7 +530,7 @@ ins!(INS_SPUT, 113, ACTION_SETS_STATIC_FIELD | CFMT_REG_FIELD);
 ins!(
     INS_SPUT_WIDE,
     114,
-    ACTION_SETS_STATIC_FIELD | CFMT_REG_FIELD
+    ACTION_SETS_STATIC_FIELD | CFMT_REG_FIELD | PAIR_FIRST
 );
 ins!(
     INS_SPUT_OBJECT,
@@ -347,7 +565,7 @@ ins!(
 ins!(
     INS_SGET_WIDE_VOLATILE,
     121,
-    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD
+    ACTION_GETS_STATIC_FIELD | ACTION_SETS_REGISTER | CFMT_REG_FIELD | PAIR_FIRST
 );
 ins!(
     INS_SGET_OBJECT_VOLATILE,
@@ -362,7 +580,7 @@ ins!(
 ins!(
     INS_SPUT_WIDE_VOLATILE,
     124,
-    ACTION_SETS_STATIC_FIELD | CFMT_REG_FIELD
+    ACTION_SETS_STATIC_FIELD | CFMT_REG_FIELD | PAIR_FIRST
 );
 ins!(
     INS_SPUT_OBJECT_VOLATILE,
@@ -435,7 +653,7 @@ ins!(
 ins!(
     INS_IGET_WIDE,
     141,
-    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD | PAIR_FIRST
 );
 ins!(
     INS_IGET_OBJECT,
@@ -470,7 +688,7 @@ ins!(
 ins!(
     INS_IPUT_WIDE,
     148,
-    ACTION_SETS_INSTANCE_FIELD | CFMT_REG_REG_FIELD
+    ACTION_SETS_INSTANCE_FIELD | CFMT_REG_REG_FIELD | PAIR_FIRST
 );
 ins!(
     INS_IPUT_OBJECT,
@@ -505,7 +723,7 @@ ins!(
 ins!(
     INS_IGET_WIDE_VOLATILE,
     155,
-    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD
+    ACTION_GETS_INSTANCE_FIELD | ACTION_SETS_REGISTER | CFMT_REG_REG_FIELD | PAIR_FIRST
 );
 ins!(
     INS_IGET_OBJECT_VOLATILE,
@@ -520,7 +738,7 @@ ins!(
 ins!(
     INS_IPUT_WIDE_VOLATILE,
     158,
-    ACTION_SETS_INSTANCE_FIELD | CFMT_REG_REG_FIELD
+    ACTION_SETS_INSTANCE_FIELD | CFMT_REG_REG_FIELD | PAIR_FIRST
 );
 ins!(
     INS_IPUT_OBJECT_VOLATILE,
@@ -541,7 +759,7 @@ ins!(
 ins!(
     INS_IGET_WIDE_QUICK,
     163,
-    ACTION_SETS_REGISTER | ACTION_GETS_INSTANCE_FIELD
+    ACTION_SETS_REGISTER | ACTION_GETS_INSTANCE_FIELD | PAIR_FIRST
 );
 ins!(
     INS_IGET_OBJECT_QUICK,
@@ -549,7 +767,11 @@ ins!(
     ACTION_SETS_REGISTER | ACTION_GETS_INSTANCE_FIELD
 );
 ins!(INS_IPUT_QUICK, 165, ACTION_SETS_INSTANCE_FIELD);
-ins!(INS_IPUT_WIDE_QUICK, 166, ACTION_SETS_INSTANCE_FIELD);
+ins!(
+    INS_IPUT_WIDE_QUICK,
+    166,
+    ACTION_SETS_INSTANCE_FIELD | PAIR_FIRST
+);
 ins!(INS_IPUT_OBJECT_QUICK, 167, ACTION_SETS_INSTANCE_FIELD);
 ins!(INS_IPUT_BOOLEAN_QUICK, 168, ACTION_SETS_INSTANCE_FIELD);
 ins!(INS_IPUT_BYTE_QUICK, 169, ACTION_SETS_INSTANCE_FIELD);
@@ -591,50 +813,78 @@ ins!(
     179,
     ACTION_SETS_REGISTER | CFMT_REG_REG_NUM
 );
-ins!(INS_MOVE_FROM16, 180, ACTION_SETS_REGISTER | CFMT_REG_REG);
+ins!(
+    INS_MOVE_FROM16,
+    180,
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG
+);
 ins!(
     INS_MOVE_WIDE_FROM16,
     181,
-    ACTION_SETS_REGISTER | CFMT_REG_REG
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND
 );
 ins!(
     INS_MOVE_OBJECT_FROM16,
     182,
-    ACTION_SETS_REGISTER | CFMT_REG_REG
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG
 );
 ins!(INS_CMPL_FLOAT, 183, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(INS_CMPG_FLOAT, 184, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(
     INS_CMPL_DOUBLE,
     185,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_REG
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_SECOND | PAIR_THIRD
 );
 ins!(
     INS_CMPG_DOUBLE,
     186,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_REG
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_SECOND | PAIR_THIRD
 );
-ins!(INS_CMP_LONG, 187, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_AGET, 188, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_AGET_WIDE, 189, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
+ins!(
+    INS_CMP_LONG,
+    187,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_AGET,
+    188,
+    ACTION_SETS_REGISTER | ACTION_GETS_ARRAY_ELEMENT | CFMT_REG_REG_REG
+);
+ins!(
+    INS_AGET_WIDE,
+    189,
+    ACTION_SETS_REGISTER | ACTION_GETS_ARRAY_ELEMENT | CFMT_REG_REG_REG | PAIR_FIRST
+);
 ins!(
     INS_AGET_OBJECT,
     190,
-    ACTION_SETS_REGISTER | CFMT_REG_REG_REG
+    ACTION_SETS_REGISTER | ACTION_GETS_ARRAY_ELEMENT | CFMT_REG_REG_REG
 );
 ins!(
     INS_AGET_BOOLEAN,
     191,
     ACTION_SETS_REGISTER | CFMT_REG_REG_REG
 );
-ins!(INS_AGET_BYTE, 192, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_AGET_CHAR, 193, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_AGET_SHORT, 194, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
+ins!(
+    INS_AGET_BYTE,
+    192,
+    ACTION_SETS_REGISTER | ACTION_GETS_ARRAY_ELEMENT | CFMT_REG_REG_REG
+);
+ins!(
+    INS_AGET_CHAR,
+    193,
+    ACTION_SETS_REGISTER | ACTION_GETS_ARRAY_ELEMENT | CFMT_REG_REG_REG
+);
+ins!(
+    INS_AGET_SHORT,
+    194,
+    ACTION_SETS_REGISTER | ACTION_GETS_ARRAY_ELEMENT | CFMT_REG_REG_REG
+);
 ins!(INS_APUT, 195, ACTION_SETS_ARRAY_ELEMENT | CFMT_REG_REG_REG);
 ins!(
     INS_APUT_WIDE,
     196,
-    ACTION_SETS_ARRAY_ELEMENT | CFMT_REG_REG_REG
+    ACTION_SETS_ARRAY_ELEMENT | CFMT_REG_REG_REG | PAIR_FIRST
 );
 ins!(
     INS_APUT_OBJECT,
@@ -672,37 +922,109 @@ ins!(INS_XOR_INT, 209, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(INS_SHL_INT, 210, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(INS_SHR_INT, 211, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(INS_USHR_INT, 212, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_ADD_LONG, 213, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_SUB_LONG, 214, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_MUL_LONG, 215, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_DIV_LONG, 216, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_REM_LONG, 217, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_AND_LONG, 218, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_OR_LONG, 219, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_XOR_LONG, 220, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_SHL_LONG, 221, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_SHR_LONG, 222, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_USHR_LONG, 223, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
+ins!(
+    INS_ADD_LONG,
+    213,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_SUB_LONG,
+    214,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_MUL_LONG,
+    215,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_DIV_LONG,
+    216,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_REM_LONG,
+    217,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_AND_LONG,
+    218,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_OR_LONG,
+    219,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_XOR_LONG,
+    220,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_SHL_LONG,
+    221,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
+ins!(
+    INS_SHR_LONG,
+    222,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
+ins!(
+    INS_USHR_LONG,
+    223,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
 ins!(INS_ADD_FLOAT, 224, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(INS_SUB_FLOAT, 225, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(INS_MUL_FLOAT, 226, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(INS_DIV_FLOAT, 227, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(INS_REM_FLOAT, 228, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_ADD_DOUBLE, 229, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_SUB_DOUBLE, 230, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_MUL_DOUBLE, 231, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_DIV_DOUBLE, 232, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
-ins!(INS_REM_DOUBLE, 233, ACTION_SETS_REGISTER | CFMT_REG_REG_REG);
 ins!(
-    INS_FILL_ARRAY_DATA,
-    234,
-    ACTION_SETS_REGISTER | CFMT_REG_LABEL
+    INS_ADD_DOUBLE,
+    229,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
 );
+ins!(
+    INS_SUB_DOUBLE,
+    230,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_MUL_DOUBLE,
+    231,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_DIV_DOUBLE,
+    232,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(
+    INS_REM_DOUBLE,
+    233,
+    ACTION_SETS_REGISTER | CFMT_REG_REG_REG | PAIR_FIRST | PAIR_SECOND | PAIR_THIRD
+);
+ins!(INS_FILL_ARRAY_DATA, 234, CFMT_REG_LABEL);
 ins!(INS_SPARSE_SWITCH, 235, ACTION_SWITCH | CFMT_REG_LABEL);
 ins!(INS_PACKED_SWITCH, 236, ACTION_SWITCH | CFMT_REG_LABEL);
-ins!(INS_MOVE_16, 237, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_MOVE_WIDE_16, 238, ACTION_SETS_REGISTER | CFMT_REG_REG);
-ins!(INS_MOVE_OBJECT_16, 239, ACTION_SETS_REGISTER | CFMT_REG_REG);
+ins!(
+    INS_MOVE_16,
+    237,
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG
+);
+ins!(
+    INS_MOVE_WIDE_16,
+    238,
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG | PAIR_FIRST | PAIR_SECOND
+);
+ins!(
+    INS_MOVE_OBJECT_16,
+    239,
+    ACTION_SETS_REGISTER | ACTION_MOVE | CFMT_REG_REG
+);
 ins!(
     INS_FILLED_NEW_ARRAY,
     240,
@@ -1366,6 +1688,12 @@ impl Deref for Instruction {
     }
 }
 
+impl Hash for Instruction {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state)
+    }
+}
+
 impl Instruction {
     /// Return only the bits important for checking formats. This value
     /// can be compared directly to INS_FMT* constants.
@@ -1387,10 +1715,87 @@ impl Instruction {
         self.0.contains(InsBits::ACTION_SETS_REGISTER)
     }
 
+    /// Checks to see if the instruction returns.
+    #[inline]
+    pub fn is_return(self) -> bool {
+        self.0.contains(InsBits::ACTION_RETURN)
+    }
+
+    /// Checks to see if the instruction returns a value instead of just simply returns
+    #[inline]
+    pub fn returns_value(self) -> bool {
+        self.is_return() && !self.0.contains(InsBits::FMT_BARE)
+    }
+
+    /// Checks if the instruction is a throw
+    #[inline]
+    pub fn is_throw(self) -> bool {
+        self == INS_THROW
+    }
+
+    #[inline]
+    pub fn is_move(self) -> bool {
+        self.0.contains(InsBits::ACTION_MOVE)
+    }
+
+    #[inline]
+    pub fn reads_result(self) -> bool {
+        self.0.contains(InsBits::ACTION_MOVE_RESULT)
+    }
+
+    /// Checks whether the first register names a 64 bit pair, meaning the
+    /// register numbered one higher is implicitly part of it.
+    #[inline]
+    pub fn pair_first(self) -> bool {
+        self.0.contains(InsBits::PAIR_FIRST)
+    }
+
+    /// Checks whether the second register names a 64 bit pair.
+    #[inline]
+    pub fn pair_second(self) -> bool {
+        self.0.contains(InsBits::PAIR_SECOND)
+    }
+
+    /// Checks whether the third register names a 64 bit pair.
+    #[inline]
+    pub fn pair_third(self) -> bool {
+        self.0.contains(InsBits::PAIR_THIRD)
+    }
+
+    /// Checks whether any register operand names a 64 bit pair.
+    #[inline]
+    pub fn has_pair(self) -> bool {
+        self.0.intersects(InsBits::PAIR_MASK)
+    }
+
+    /// Checks whether the first register is read before it is written. Always
+    /// implies [Instruction::sets_register].
+    #[inline]
+    pub fn is_inout(self) -> bool {
+        self.0.contains(InsBits::ACTION_INOUT)
+    }
+
+    #[inline]
+    pub fn is_terminator(self) -> bool {
+        self.is_return() || self.is_throw() || self.is_cond() || self.is_jump()
+    }
+
     /// Checks to see if the instruction calls another method.
     #[inline]
     pub fn is_call(self) -> bool {
         self.0.contains(InsBits::ACTION_INVOKE)
+    }
+
+    /// Checks to see if the instruction sets an array element.
+    #[inline]
+    pub fn sets_array_element(self) -> bool {
+        self.0.contains(InsBits::ACTION_SETS_ARRAY_ELEMENT)
+    }
+
+    /// Checks to see if the instruction gets an array element.
+    #[inline]
+    pub fn gets_array_element(self) -> bool {
+        self.0.contains(InsBits::ACTION_GETS_ARRAY_ELEMENT)
     }
 
     /// Checks to see if the instruction gets a static field
@@ -1430,6 +1835,11 @@ impl Instruction {
     }
 
     #[inline]
+    pub fn is_jump(self) -> bool {
+        self.0.contains(InsBits::ACTION_UNCOND_JUMP)
+    }
+
+    #[inline]
     pub fn is_switch(self) -> bool {
         self.0.contains(InsBits::ACTION_SWITCH)
     }
@@ -1445,19 +1855,23 @@ impl Instruction {
         self.0.contains(InsBits::ACTION_FORKING_COND)
     }
 
+    /// Return the raw bits, this value should be treated as opaque but unique to a given
+    /// instruction
+    ///
+    /// The raw bits used to encode an instruction should be stable within a major version of this
+    /// crate
     #[inline]
     pub fn raw(self) -> u64 {
         self.0.bits()
     }
 
+    /// Meant to be used as a counterpart to [Instruction::raw] for serialization purposes
+    ///
+    /// No checks are performed on the passed bits, it is possible to create an invalid
+    /// instruction this way!
     #[inline]
-    pub fn from_raw(raw: u64) -> Option<Self> {
-        InsBits::from_bits(raw).map(Self)
-    }
-
-    #[inline]
-    pub fn from_raw_unchecked(raw: u64) -> Self {
-        Self(InsBits::from_bits_truncate(raw))
+    pub fn from_raw(raw: u64) -> Self {
+        Self(InsBits::from_bits_retain(raw))
     }
 }
 

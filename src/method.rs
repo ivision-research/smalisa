@@ -4,8 +4,7 @@ use std::hash::Hash;
 use crate::instructions::Invocation;
 use crate::utils::ptr_eq;
 use crate::{
-    simple_deref, AccessFlag, Annotation, ArrayData, Catch, Label, ParamAnnotations, Primitive,
-    SwitchData, Type,
+    AccessFlag, Annotation, ArrayData, Catch, Label, ParamAnnotations, Primitive, SwitchData, Type,
 };
 use smallvec::SmallVec;
 pub fn parse_method_args_into<'a>(args: &'a str, into: &mut Vec<Type<'a>>) -> Result<(), &'a str> {

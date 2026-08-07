@@ -1,4 +1,4 @@
-#[macro_export]
+#[allow(unused)]
 macro_rules! ptr_eq {
     ($lhs:ident, $rhs:ident, $ty:ty) => {
         ::std::ptr::eq(
@@ -13,7 +13,7 @@ pub(crate) fn ptr_eq<T>(lhs: &T, rhs: &T) -> bool {
     ::std::ptr::eq(lhs as *const T as *const u8, rhs as *const T as *const u8)
 }
 
-#[macro_export]
+#[allow(unused)]
 macro_rules! simple_err_display {
     ($ty:ty) => {
         impl ::std::fmt::Display for $ty {
@@ -24,7 +24,6 @@ macro_rules! simple_err_display {
     };
 }
 
-#[macro_export]
 macro_rules! simple_deref {
     ($ty:ty, $field:ident, $target:ty) => {
         simple_deref!($ty, $field, $target,);
@@ -37,20 +36,9 @@ macro_rules! simple_deref {
             }
         }
     };
-
-    /*
-    ($ty:ty, $field:ident, $target:ty, $lt:lifetime) => {
-        impl<$lt> ::std::ops::Deref for $ty {
-            type Target = $target;
-            fn deref(&self) -> &Self::Target {
-                &self.$field
-            }
-        }
-    };
-    */
 }
 
-#[macro_export]
+#[allow(unused)]
 macro_rules! slice_iter {
     ($name:ident, $ty:ident, $lt:lifetime) => {
         pub type $name<$lt> = ::std::slice::Iter<$lt, $ty<$lt>>;

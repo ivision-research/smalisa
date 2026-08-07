@@ -57,53 +57,6 @@ impl fmt::Display for Register {
     }
 }
 
-/*
-#[derive(Debug, Copy, Clone)]
-pub struct Register {
-    pub(crate) p: bool,
-    pub(crate) num: usize,
-}
-
-impl cmp::PartialEq for Register {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.p == other.p && self.num == other.num
-    }
-}
-
-impl cmp::Eq for Register {}
-
-impl fmt::Display for Register {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.p {
-            write!(f, "p{}", self.num)
-        } else {
-            write!(f, "v{}", self.num)
-        }
-    }
-}
-
-impl Register {
-    pub fn parse(s: &str) -> Option<Register> {
-        let is_p = s.bytes().next()? == b'p';
-        let num: usize = s.get(1..)?.parse().ok()?;
-        Some(Self { p: is_p, num })
-    }
-}
-
-impl Register {
-    #[inline(always)]
-    pub fn is_param(&self) -> bool {
-        self.p
-    }
-
-    #[inline(always)]
-    pub fn num(&self) -> usize {
-        self.num
-    }
-}
-*/
-
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct RegisterRange {
     pub(crate) first: Register,
@@ -188,7 +141,7 @@ impl RegisterArray {
 
     #[inline]
     pub fn get_register(&self, n: usize) -> Option<Register> {
-        if n > self.i {
+        if n >= self.i {
             None
         } else {
             Some(self.registers[n])
@@ -216,6 +169,132 @@ impl fmt::Display for RegisterArray {
         write!(f, "}}")
     }
 }
+
+/// The registers an instruction actually uses, with 64 bit pairs expanded so that the implicit high
+/// half follows its low register.
+///
+/// Unlike [VarRegister] this includes registers that don't appear in the smali directly, such as
+/// with wide instructions naming `v0` but using `v0` and `v1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RegisterCollection {
+    /// Fixed register list that also makes the implict ones explicit
+    Fixed {
+        regs: [Register; MAX_FIXED_REGISTERS],
+        len: usize,
+    },
+    /// Just wraps VarRegister
+    Var(VarRegister),
+}
+
+pub const MAX_FIXED_REGISTERS: usize = 6;
+
+impl Default for RegisterCollection {
+    #[inline]
+    fn default() -> Self {
+        Self::Fixed {
+            regs: [Register::default(); MAX_FIXED_REGISTERS],
+            len: 0,
+        }
+    }
+}
+
+impl RegisterCollection {
+    pub(crate) fn from_slots(regs: [Register; MAX_FIXED_REGISTERS], len: usize) -> Self {
+        Self::Fixed { regs, len }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Fixed { len, .. } => *len,
+            Self::Var(VarRegister::Empty) => 0,
+            Self::Var(VarRegister::Array(array)) => array.count(),
+            Self::Var(VarRegister::Range(range)) => {
+                range.get_last_num() - range.get_first_num() + 1
+            }
+        }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn get(&self, idx: usize) -> Option<Register> {
+        match self {
+            Self::Fixed { regs, len } => {
+                if idx < *len {
+                    Some(regs[idx])
+                } else {
+                    None
+                }
+            }
+            Self::Var(VarRegister::Empty) => None,
+            Self::Var(VarRegister::Array(array)) => array.get_register(idx),
+            Self::Var(VarRegister::Range(range)) => {
+                let num = range.get_first_num().checked_add(idx)?;
+                if num <= range.get_last_num() {
+                    Some(Register::new(range.is_params(), num))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn iter(&self) -> RegisterCollectionIter {
+        RegisterCollectionIter {
+            regs: *self,
+            idx: 0,
+        }
+    }
+}
+
+impl IntoIterator for RegisterCollection {
+    type Item = Register;
+    type IntoIter = RegisterCollectionIter;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        RegisterCollectionIter { regs: self, idx: 0 }
+    }
+}
+
+impl IntoIterator for &RegisterCollection {
+    type Item = Register;
+    type IntoIter = RegisterCollectionIter;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RegisterCollectionIter {
+    regs: RegisterCollection,
+    idx: usize,
+}
+
+impl Iterator for RegisterCollectionIter {
+    type Item = Register;
+
+    #[inline]
+    fn next(&mut self) -> Option<Register> {
+        let reg = self.regs.get(self.idx)?;
+        self.idx += 1;
+        Some(reg)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let rem = self.regs.len().saturating_sub(self.idx);
+        (rem, Some(rem))
+    }
+}
+
+impl ExactSizeIterator for RegisterCollectionIter {}
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum VarRegister {
