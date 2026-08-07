@@ -1444,6 +1444,21 @@ impl Instruction {
     pub fn is_forking_cond(self) -> bool {
         self.0.contains(InsBits::ACTION_FORKING_COND)
     }
+
+    #[inline]
+    pub fn raw(self) -> u64 {
+        self.0.bits()
+    }
+
+    #[inline]
+    pub fn from_raw(raw: u64) -> Option<Self> {
+        InsBits::from_bits(raw).map(Self)
+    }
+
+    #[inline]
+    pub fn from_raw_unchecked(raw: u64) -> Self {
+        Self(InsBits::from_bits_truncate(raw))
+    }
 }
 
 impl fmt::Debug for Instruction {
