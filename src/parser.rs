@@ -1,6 +1,8 @@
 use thiserror::Error;
 
+use crate::class::ClassLineBuilder;
 use crate::instructions::{InsBits, Instruction, InvArgs, Invocation};
+use crate::method::MethodLineBuilder;
 use crate::*;
 
 pub type ParseResult<'a> = Result<(), ParseError<'a>>;
@@ -13,104 +15,46 @@ pub trait LineParse<'a> {
     fn skip_to_next_method(&mut self, into: &mut Line<'a>) -> ParseResult<'a>;
 }
 
-/// Takes any LineParse object and uses it to create a fully parsed Class.
-/// Note that this function uses _unchecked variants of internal crate
-/// functions. You may get a panic on bad smali!
+/// Takes any [LineParse] object and uses it to create a fully parsed [Class]. Note that this function
+/// uses _unchecked variants of internal crate function:. you may get a panic on bad smali!
 pub fn parse_class<'a, P: LineParse<'a>>(parser: &mut P) -> Result<Class<'a>, ParseError<'a>> {
-    let mut clazz: Class = Default::default();
+    let mut builder = ClassLineBuilder::new();
     let mut line = Line::Empty;
     loop {
         let res = parser.parse_line_into(&mut line);
         if let Err(perr) = res {
             if perr.is_eof() {
-                return Ok(clazz);
+                return Ok(builder.finish());
             }
             return Err(perr);
         }
-        match line {
-            Line::Class(acc, cd) => {
-                clazz.access = acc;
-                clazz.name = cd;
-            }
-            Line::Super(sup) => {
-                clazz.parent = sup;
-            }
-            Line::Interface(inf) => {
-                clazz.interfaces.push(inf);
-            }
-            Line::MethodHeader(ref mh) => {
-                let mut method = Method {
-                    header: mh.clone(),
-                    ..Default::default()
-                };
-                parse_method(parser, &mut method)?;
-                clazz.methods.push(method);
-            }
-            Line::Field(ref field) => {
-                clazz.fields.push(field.clone());
-            }
-            Line::Annotation(ref ann) => {
-                clazz.annotations.push(ann.clone());
-            }
-            _ => {
-                eprintln!("ignored line! {:?}", line);
-            }
-        }
+        builder.push_line(&line);
     }
 }
 
-pub fn parse_method<'a, 'b, P: LineParse<'a>>(
-    parser: &mut P,
-    method: &mut Method<'a>,
-) -> ParseResult<'a> {
-    // TODO remove the _unchecked maybe
+/// Parse a [Method] out of the [LineParse]
+///
+/// Note that this function will silently drop [Line]s until the first [Line::MethodHeader]
+pub fn parse_method<'a, P: LineParse<'a>>(parser: &mut P) -> ParseResultT<'a, Option<Method<'a>>> {
     let mut line = Line::Empty;
-    let mut param_annotations: Vec<ParamAnnotations<'a>> = Vec::new();
     loop {
-        parser.parse_line_into(&mut line)?;
-        match line {
-            Line::MethodEnd => {
-                if param_annotations.len() > 0 {
-                    method.param_annotations = Some(param_annotations);
+        let res = parser.parse_line_into(&mut line);
+        if let Err(perr) = res {
+            if perr.is_eof() {
+                return Ok(None);
+            }
+            return Err(perr);
+        }
+
+        if let Line::MethodHeader(mh) = &line {
+            let mut builder = MethodLineBuilder::new(mh);
+            loop {
+                parser.parse_line_into(&mut line)?;
+                if matches!(line, Line::MethodEnd) {
+                    return Ok(Some(builder.finish()));
                 }
-                return Ok(());
+                builder.push_line(&line);
             }
-            Line::Annotation(ref ann) => {
-                method.annotations.push(ann.clone());
-            }
-            Line::InstructionInvocation(ref inv) => {
-                method.lines.push(MethodLine::Instruction(inv.clone()));
-            }
-            Line::LabelDefinition(lab) => {
-                let parsed = lab.to_label_unchecked();
-                method.lines.push(MethodLine::LabelDef(parsed));
-            }
-            Line::NamedCatch(catch) => {
-                method
-                    .lines
-                    .push(MethodLine::Catch(Catch::Named(catch.to_parsed_unchecked())));
-            }
-            Line::CatchAll(catch) => {
-                method.lines.push(MethodLine::Catch(Catch::All(
-                    catch.to_parsed_all_unchecked(),
-                )));
-            }
-            Line::PackedSwitchData(ref psd) => {
-                method.packed_switch_data.push(psd.to_parsed_unchecked());
-            }
-            Line::SparseSwitchData(ref ssd) => {
-                method.sparse_switch_data.push(ssd.to_parsed_unchecked());
-            }
-            Line::ArrayData(ref ad) => {
-                method.array_data.push(ad.to_parsed_unchecked());
-            }
-            Line::ParamLine(reg, name, ref annotations) => {
-                if let Some(ann) = annotations {
-                    let pa = ParamAnnotations::new(reg, name, ann.clone());
-                    param_annotations.push(pa);
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -1885,8 +1829,7 @@ mod test {
 
         let lex = Lexer::new(line.as_bytes(), &arena);
         let mut parser = Parser::new(lex);
-        let mut method = Method::default();
-        parse_method(&mut parser, &mut method).expect("failed to parse method");
+        parse_method(&mut parser).expect("failed to parse method");
     }
 
     #[test]

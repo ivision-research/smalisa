@@ -10,15 +10,15 @@ mod lexer;
 pub use lexer::{Lex, LexError, LexResult, Lexer};
 
 mod parser;
-pub use parser::{parse_class, LineParse, ParseError, ParseResult, Parser};
+pub use parser::{parse_class, parse_method, LineParse, ParseError, ParseResult, Parser};
 
 mod line;
 pub use line::Line;
 
 mod register;
 pub use register::{
-    Register, RegisterArray, RegisterRange, RegisterCollection, RegisterCollectionIter, VarRegister,
-    MAX_FIXED_REGISTERS,
+    Register, RegisterArray, RegisterCollection, RegisterCollectionIter, RegisterRange,
+    VarRegister, MAX_FIXED_REGISTERS,
 };
 
 mod access;
@@ -34,11 +34,12 @@ mod arena;
 pub use arena::Arena;
 
 mod class;
-pub use class::{Class, PackageClass};
+pub use class::{Class, ClassLineBuilder, PackageClass};
 
 mod method;
 pub use method::{
-    parse_method_args, parse_method_args_into, Method, MethodHeader, MethodLine, MethodRef,
+    parse_method_args, parse_method_args_into, Method, MethodHeader, MethodLine, MethodLineBuilder,
+    MethodRef,
 };
 
 mod field;

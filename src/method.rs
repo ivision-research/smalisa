@@ -1,10 +1,12 @@
 use std::borrow::Cow;
 use std::hash::Hash;
+use std::ops::{Deref, DerefMut};
 
 use crate::instructions::Invocation;
 use crate::utils::ptr_eq;
 use crate::{
-    AccessFlag, Annotation, ArrayData, Catch, Label, ParamAnnotations, Primitive, SwitchData, Type,
+    AccessFlag, Annotation, ArrayData, Catch, Label, Line, ParamAnnotations, Primitive, SwitchData,
+    Type,
 };
 use smallvec::SmallVec;
 pub fn parse_method_args_into<'a>(args: &'a str, into: &mut Vec<Type<'a>>) -> Result<(), &'a str> {
@@ -244,6 +246,89 @@ pub struct Method<'a> {
     pub packed_switch_data: Vec<SwitchData>,
     pub sparse_switch_data: Vec<SwitchData>,
     pub array_data: Vec<ArrayData>,
+}
+
+pub struct MethodLineBuilder<'a> {
+    method: Method<'a>,
+}
+
+impl<'a> Deref for MethodLineBuilder<'a> {
+    type Target = Method<'a>;
+    fn deref(&self) -> &Self::Target {
+        &self.method
+    }
+}
+
+impl<'a> DerefMut for MethodLineBuilder<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.method
+    }
+}
+
+impl<'a> MethodLineBuilder<'a> {
+    pub fn new(mh: &MethodHeader<'a>) -> Self {
+        Self {
+            method: Method {
+                header: mh.clone(),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Push a [Line] into the Method.
+    ///
+    /// This can be helpful for manually building Methods from [Line]s but note that this type is
+    /// completely unaware of state: [Line::MethodEnd] and [Line::MethodHeader] are silently
+    /// ignored. It is up to the driver to manage state correctly!
+    pub fn push_line(&mut self, line: &Line<'a>) {
+        // TODO remove the _unchecked maybe
+        match line {
+            Line::Annotation(ref ann) => {
+                self.annotations.push(ann.clone());
+            }
+            Line::InstructionInvocation(ref inv) => {
+                self.lines.push(MethodLine::Instruction(inv.clone()));
+            }
+            Line::LabelDefinition(lab) => {
+                let parsed = lab.to_label_unchecked();
+                self.lines.push(MethodLine::LabelDef(parsed));
+            }
+            Line::NamedCatch(catch) => {
+                self.lines
+                    .push(MethodLine::Catch(Catch::Named(catch.to_parsed_unchecked())));
+            }
+            Line::CatchAll(catch) => {
+                self.lines.push(MethodLine::Catch(Catch::All(
+                    catch.to_parsed_all_unchecked(),
+                )));
+            }
+            Line::PackedSwitchData(ref psd) => {
+                self.packed_switch_data.push(psd.to_parsed_unchecked());
+            }
+            Line::SparseSwitchData(ref ssd) => {
+                self.sparse_switch_data.push(ssd.to_parsed_unchecked());
+            }
+            Line::ArrayData(ref ad) => {
+                self.array_data.push(ad.to_parsed_unchecked());
+            }
+            Line::ParamLine(reg, name, ref annotations) => {
+                if let Some(ann) = annotations {
+                    let pa = ParamAnnotations::new(*reg, name, ann.clone());
+                    if let Some(v) = &mut self.param_annotations {
+                        v.push(pa);
+                    } else {
+                        self.param_annotations = Some(vec![pa]);
+                    }
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    pub fn finish(self) -> Method<'a> {
+        self.method
+    }
 }
 
 impl<'a> PartialEq for Method<'a> {

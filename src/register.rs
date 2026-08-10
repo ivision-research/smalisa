@@ -3,7 +3,7 @@ use std::fmt;
 const PARAM_BIT: usize = 1 << (std::mem::size_of::<usize>() - 1);
 const NUM_BIT_MASK: usize = !PARAM_BIT;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Register(usize);
 
