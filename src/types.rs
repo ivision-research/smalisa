@@ -7,8 +7,8 @@ use crate::{PackageClass, Primitive};
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum Type<'a> {
     Unknown,
-    Class(&'a str, usize),
-    Primitive(Primitive, usize),
+    Class(&'a str, u8),
+    Primitive(Primitive, u8),
 }
 
 impl<'a> Hash for Type<'a> {
@@ -33,10 +33,10 @@ impl<'a> fmt::Display for Type<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Type::Class(cd, size) => {
-                write!(f, "{}{}", "[".repeat(size), cd)
+                write!(f, "{}{}", "[".repeat(size as usize), cd)
             }
             Type::Primitive(prim, size) => {
-                write!(f, "{}{}", "[".repeat(size), prim)
+                write!(f, "{}{}", "[".repeat(size as usize), prim)
             }
             Type::Unknown => {
                 write!(f, "?")
@@ -55,7 +55,7 @@ impl<'a> Type<'a> {
                 } else {
                     Some(Cow::Owned(format!(
                         "{}{}",
-                        "[".repeat(size),
+                        "[".repeat(size as usize),
                         prim.as_smali_str()
                     )))
                 }
@@ -64,7 +64,7 @@ impl<'a> Type<'a> {
                 if size == 0 {
                     Some(Cow::Borrowed(cd))
                 } else {
-                    Some(Cow::Owned(format!("{}{}", "[".repeat(size), cd)))
+                    Some(Cow::Owned(format!("{}{}", "[".repeat(size as usize), cd)))
                 }
             }
             Type::Unknown => None,
@@ -81,7 +81,7 @@ impl<'a> Type<'a> {
                     Some(Cow::Owned(format!(
                         "{}{}",
                         prim.as_java_str(),
-                        "[]".repeat(size)
+                        "[]".repeat(size as usize)
                     )))
                 }
             }
@@ -103,10 +103,14 @@ impl<'a> Type<'a> {
                             "{}.{}{}",
                             pclass.dot_package(),
                             pclass.name,
-                            "[]".repeat(size)
+                            "[]".repeat(size as usize)
                         )))
                     } else {
-                        Some(Cow::Owned(format!("{}{}", pclass.name, "[]".repeat(size))))
+                        Some(Cow::Owned(format!(
+                            "{}{}",
+                            pclass.name,
+                            "[]".repeat(size as usize)
+                        )))
                     }
                 }
             }
@@ -122,7 +126,7 @@ impl<'a> Type<'a> {
     }
 
     #[inline]
-    pub fn new_prim_array(p: Primitive, dim: usize) -> Self {
+    pub fn new_prim_array(p: Primitive, dim: u8) -> Self {
         Self::Primitive(p, dim)
     }
 
@@ -132,7 +136,7 @@ impl<'a> Type<'a> {
     }
 
     #[inline]
-    pub fn new_class_array(clazz: &'a str, dim: usize) -> Self {
+    pub fn new_class_array(clazz: &'a str, dim: u8) -> Self {
         Self::Class(clazz, dim)
     }
 }

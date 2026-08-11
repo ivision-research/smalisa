@@ -40,7 +40,7 @@ impl<'a> ClassLineBuilder<'a> {
     /// Note that this function is not state aware, a new [Line::Class] or other class related lines
     /// will overwrite any previously set state. It is up to the caller to manage state and ensure
     /// only a single class's [Line]s are pushed into the builder
-    pub fn push_line(&mut self, line: &Line<'a>) {
+    pub fn push_line(&mut self, line: Line<'a>) {
         if matches!(line, Line::MethodEnd) {
             if let Some(method) = self.method.take() {
                 self.class.methods.push(method.finish());
@@ -50,7 +50,7 @@ impl<'a> ClassLineBuilder<'a> {
         } else {
             match line {
                 Line::Class(acc, cd) => {
-                    self.class.access = *acc;
+                    self.class.access = acc;
                     self.class.name = cd;
                 }
                 Line::Super(sup) => {
@@ -59,14 +59,14 @@ impl<'a> ClassLineBuilder<'a> {
                 Line::Interface(inf) => {
                     self.class.interfaces.push(inf);
                 }
-                Line::MethodHeader(ref mh) => {
-                    self.method = Some(MethodLineBuilder::new(mh));
+                Line::MethodHeader(mh) => {
+                    self.method = Some(MethodLineBuilder::new(&mh));
                 }
-                Line::Field(ref field) => {
-                    self.class.fields.push(field.clone());
+                Line::Field(field) => {
+                    self.class.fields.push(field);
                 }
-                Line::Annotation(ref ann) => {
-                    self.class.annotations.push(ann.clone());
+                Line::Annotation(ann) => {
+                    self.class.annotations.push(ann);
                 }
                 _ => {}
             }

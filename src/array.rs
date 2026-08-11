@@ -5,7 +5,7 @@ use crate::{NumericLiteral, RawLabel};
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ArrayData {
     pub label_id: u32,
-    pub data_size: usize,
+    pub data_size: u8,
     pub data: Vec<NumericLiteral>,
 }
 
@@ -39,7 +39,7 @@ impl<'a> RawArrayData<'a> {
     }
 
     pub fn to_parsed(&self) -> Option<ArrayData> {
-        let ds = usize::from_str_radix(self.data_size, 10).ok()?;
+        let ds = u8::from_str_radix(self.data_size, 10).ok()?;
         // TODO: This is handling a weird case that I've seen. The smali source has a test for
         // "LZeroArrayPayloadWidthTest" that will trigger this path, so it seems they're aware of
         // stuff like this happening.

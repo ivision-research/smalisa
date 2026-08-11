@@ -1,11 +1,25 @@
 use std::fmt;
 
-const PARAM_BIT: usize = 1 << (std::mem::size_of::<usize>() - 1);
-const NUM_BIT_MASK: usize = !PARAM_BIT;
+#[cfg(feature = "big-registers")]
+pub type RegisterNumber = u32;
+
+#[cfg(not(feature = "big-registers"))]
+pub type RegisterNumber = u16;
+
+const PARAM_BIT: RegisterNumber = 1 << (std::mem::size_of::<RegisterNumber>() * 8 - 1);
+const NUM_BIT_MASK: RegisterNumber = !PARAM_BIT;
+
+#[cfg(feature = "big-registers")]
+pub type RegisterError = core::convert::Infallible;
+
+#[cfg(not(feature = "big-registers"))]
+#[derive(Debug, thiserror::Error)]
+#[error("register value 0x{0:x} too large without the `big-registers` feature enabled")]
+pub struct RegisterError(pub u16);
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub struct Register(usize);
+pub struct Register(RegisterNumber);
 
 impl Default for Register {
     #[inline(always)]
@@ -15,9 +29,17 @@ impl Default for Register {
 }
 
 impl Register {
-    #[inline]
-    pub fn new(is_p: bool, val: usize) -> Register {
-        Register(if is_p { PARAM_BIT | val } else { val })
+    /// Create a new Register for the provided value
+    ///
+    /// With `big-registers` this call can't fail, but it might fail without it.
+    pub fn new(is_p: bool, val: u16) -> Result<Self, RegisterError> {
+        #[cfg(not(feature = "big-registers"))]
+        if val > NUM_BIT_MASK as u16 {
+            return Err(RegisterError(val));
+        }
+
+        let rval = val as RegisterNumber;
+        Ok(Self::from_raw(is_p, rval))
     }
 
     #[inline]
@@ -26,15 +48,19 @@ impl Register {
     }
 
     #[inline]
-    pub fn num(&self) -> usize {
+    pub fn num(&self) -> RegisterNumber {
         self.0 & NUM_BIT_MASK
     }
 
-    pub fn parse(s: &str) -> Option<Register> {
+    #[inline]
+    pub(crate) fn from_raw(is_p: bool, val: RegisterNumber) -> Self {
+        Self(if is_p { PARAM_BIT | val } else { val })
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
         let is_p = s.bytes().next()? == b'p';
-        let reg_val = s.get(1..)?.parse().ok()?;
-        let num = if is_p { PARAM_BIT | reg_val } else { reg_val };
-        Some(Self(num))
+        let val: u16 = s.get(1..)?.parse().ok()?;
+        Self::new(is_p, val).ok()
     }
 }
 
@@ -81,12 +107,12 @@ impl RegisterRange {
     }
 
     #[inline]
-    pub fn get_first_num(&self) -> usize {
+    pub fn get_first_num(&self) -> RegisterNumber {
         self.first.num()
     }
 
     #[inline]
-    pub fn get_last_num(&self) -> usize {
+    pub fn get_last_num(&self) -> RegisterNumber {
         self.last.num()
     }
 
@@ -112,7 +138,7 @@ pub const MAX_VAR_REGISTERS: usize = 5;
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct RegisterArray {
     registers: [Register; MAX_VAR_REGISTERS],
-    i: usize,
+    i: u8,
 }
 
 impl PartialEq for RegisterArray {
@@ -120,7 +146,7 @@ impl PartialEq for RegisterArray {
         if self.i != o.i {
             return false;
         }
-        self.registers[..self.i] == o.registers[..self.i]
+        self.registers[..(self.i as usize)] == o.registers[..(self.i as usize)]
     }
 }
 
@@ -134,17 +160,17 @@ impl RegisterArray {
 
     #[inline(always)]
     pub const fn count(&self) -> usize {
-        self.i
+        self.i as usize
     }
 
     #[inline]
     pub fn get_registers(&self) -> &[Register] {
-        &self.registers[..self.i]
+        &self.registers[..(self.i as usize)]
     }
 
     #[inline]
     pub fn get_register(&self, n: usize) -> Option<Register> {
-        if n >= self.i {
+        if n >= (self.i as usize) {
             None
         } else {
             Some(self.registers[n])
@@ -158,7 +184,7 @@ impl RegisterArray {
 
     pub fn push(&mut self, reg: Register) {
         // TODO Should I make a push checked?
-        self.registers[self.i] = reg;
+        self.registers[self.i as usize] = reg;
         self.i += 1;
     }
 }
@@ -166,7 +192,7 @@ impl RegisterArray {
 impl fmt::Display for RegisterArray {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{{")?;
-        for i in 0..self.i {
+        for i in 0..(self.i as usize) {
             write!(f, "{}", self.registers[i])?;
         }
         write!(f, "}}")
@@ -184,7 +210,7 @@ pub enum RegisterCollection {
     /// Fixed register list that also makes the implict ones explicit
     Fixed {
         regs: [Register; MAX_FIXED_REGISTERS],
-        len: usize,
+        len: u8,
     },
     /// Just wraps VarRegister
     Var(VarRegister),
@@ -204,17 +230,20 @@ impl Default for RegisterCollection {
 
 impl RegisterCollection {
     pub(crate) fn from_slots(regs: [Register; MAX_FIXED_REGISTERS], len: usize) -> Self {
-        Self::Fixed { regs, len }
+        Self::Fixed {
+            regs,
+            len: len as u8,
+        }
     }
 
     #[inline]
     pub fn len(&self) -> usize {
         match self {
-            Self::Fixed { len, .. } => *len,
+            Self::Fixed { len, .. } => *len as usize,
             Self::Var(VarRegister::Empty) => 0,
             Self::Var(VarRegister::Array(array)) => array.count(),
             Self::Var(VarRegister::Range(range)) => {
-                range.get_last_num() - range.get_first_num() + 1
+                (range.get_last_num().saturating_sub(range.get_first_num()) + 1) as usize
             }
         }
     }
@@ -227,7 +256,7 @@ impl RegisterCollection {
     pub fn get(&self, idx: usize) -> Option<Register> {
         match self {
             Self::Fixed { regs, len } => {
-                if idx < *len {
+                if idx < *len as usize {
                     Some(regs[idx])
                 } else {
                     None
@@ -236,12 +265,9 @@ impl RegisterCollection {
             Self::Var(VarRegister::Empty) => None,
             Self::Var(VarRegister::Array(array)) => array.get_register(idx),
             Self::Var(VarRegister::Range(range)) => {
+                let idx: RegisterNumber = idx.try_into().ok()?;
                 let num = range.get_first_num().checked_add(idx)?;
-                if num <= range.get_last_num() {
-                    Some(Register::new(range.is_params(), num))
-                } else {
-                    None
-                }
+                (num <= range.get_last_num()).then(|| Register::from_raw(range.is_params(), num))
             }
         }
     }
@@ -312,8 +338,8 @@ impl fmt::Display for VarRegister {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "{{}}"),
-            Self::Range(ref rr) => rr.fmt(f),
-            Self::Array(ref arr) => arr.fmt(f),
+            Self::Range(rr) => rr.fmt(f),
+            Self::Array(arr) => arr.fmt(f),
         }
     }
 }
@@ -324,10 +350,10 @@ mod test {
 
     macro_rules! reg {
         (p $lit:literal) => {
-            crate::Register::new(true, $lit as usize)
+            crate::Register::new(true, u16::try_from($lit).unwrap()).unwrap()
         };
         (v $lit:literal) => {
-            crate::Register::new(false, $lit as usize)
+            crate::Register::new(false, u16::try_from($lit).unwrap()).unwrap()
         };
     }
 

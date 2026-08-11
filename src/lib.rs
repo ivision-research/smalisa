@@ -1,8 +1,5 @@
 #[macro_use]
 extern crate bitflags;
-extern crate smallvec;
-extern crate thiserror;
-
 mod token;
 pub use token::Token;
 
@@ -17,8 +14,8 @@ pub use line::Line;
 
 mod register;
 pub use register::{
-    Register, RegisterArray, RegisterCollection, RegisterCollectionIter, RegisterRange,
-    VarRegister, MAX_FIXED_REGISTERS,
+    Register, RegisterArray, RegisterCollection, RegisterCollectionIter, RegisterNumber,
+    RegisterRange, VarRegister, MAX_FIXED_REGISTERS,
 };
 
 mod access;
@@ -71,7 +68,7 @@ mod catch;
 pub use catch::{Catch, CatchAll, NamedCatch, RawCatchAll, RawNamedCatch};
 
 mod switch;
-pub use switch::{RawPackedSwitchData, RawSparseSwitchData, RawSwitchPair, SwitchData};
+pub use switch::{RawPackedSwitchData, RawSparseSwitchData, RawSwitchPair, SwitchCase, SwitchData};
 
 mod array;
 pub use array::{ArrayData, RawArrayData};

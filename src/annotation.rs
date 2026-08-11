@@ -1,7 +1,6 @@
 use crate::literal::RawLiteral;
 use crate::utils::ptr_eq;
 use crate::{Enum, MethodRef, Primitive, Register, Type};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -109,7 +108,45 @@ impl<'a> PartialEq for ParamAnnotations<'a> {
 pub struct Annotation<'a> {
     pub class: &'a str,
     pub visibility: AnnotationVisibility,
-    pub parameters: HashMap<&'a str, AnnotationValue<'a>>,
+    parameters: Vec<(&'a str, AnnotationValue<'a>)>,
+}
+
+impl<'a> Annotation<'a> {
+    pub fn new(class: &'a str, visibility: AnnotationVisibility) -> Self {
+        Self {
+            class,
+            visibility,
+            parameters: Vec::new(),
+        }
+    }
+
+    /// Set `key`, returning the previous value if there was one.
+    pub fn insert(
+        &mut self,
+        key: &'a str,
+        value: AnnotationValue<'a>,
+    ) -> Option<AnnotationValue<'a>> {
+        match self.parameters.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, existing)) => Some(std::mem::replace(existing, value)),
+            None => {
+                self.parameters.push((key, value));
+                None
+            }
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Option<&AnnotationValue<'a>> {
+        self.parameters
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v)
+    }
+
+    /// The parameters in source order.
+    #[inline]
+    pub fn parameters(&self) -> &[(&'a str, AnnotationValue<'a>)] {
+        &self.parameters
+    }
 }
 
 impl<'a> PartialEq for Annotation<'a> {
@@ -117,22 +154,14 @@ impl<'a> PartialEq for Annotation<'a> {
         if ptr_eq(self, other) {
             return true;
         }
-        if self.class != other.class || self.visibility != other.visibility {
+        if self.class != other.class
+            || self.visibility != other.visibility
+            || self.parameters.len() != other.parameters.len()
+        {
             return false;
         }
-        if self.parameters.len() != other.parameters.len() {
-            return false;
-        }
-        for k in self.parameters.keys() {
-            match other.parameters.get(k) {
-                None => return false,
-                Some(v) => {
-                    if self.parameters.get(k).unwrap() != v {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
+        self.parameters
+            .iter()
+            .all(|(key, value)| other.get(key) == Some(value))
     }
 }

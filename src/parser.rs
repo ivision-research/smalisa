@@ -5,55 +5,47 @@ use crate::instructions::{InsBits, Instruction, InvArgs, Invocation};
 use crate::method::MethodLineBuilder;
 use crate::*;
 
-pub type ParseResult<'a> = Result<(), ParseError<'a>>;
-type ParseResultT<'a, T> = Result<T, ParseError<'a>>;
+pub type ParseResult<'a, T = ()> = Result<T, ParseError<'a>>;
 
 /// LineParse is a trait for parsing a smali file by logical lines. These are
 /// not always actual single lines, see the doc on the [Line] struct.
 pub trait LineParse<'a> {
-    fn parse_line_into(&mut self, into: &mut Line<'a>) -> ParseResult<'a>;
-    fn skip_to_next_method(&mut self, into: &mut Line<'a>) -> ParseResult<'a>;
+    fn parse_line(&mut self) -> ParseResult<'a, Line<'a>>;
+    fn skip_to_next_method(&mut self) -> ParseResult<'a, Line<'a>>;
 }
 
 /// Takes any [LineParse] object and uses it to create a fully parsed [Class]. Note that this function
-/// uses _unchecked variants of internal crate function:. you may get a panic on bad smali!
+/// uses _unchecked variants of internal crate functions: you may get a panic on bad smali!
 pub fn parse_class<'a, P: LineParse<'a>>(parser: &mut P) -> Result<Class<'a>, ParseError<'a>> {
     let mut builder = ClassLineBuilder::new();
-    let mut line = Line::Empty;
     loop {
-        let res = parser.parse_line_into(&mut line);
-        if let Err(perr) = res {
-            if perr.is_eof() {
-                return Ok(builder.finish());
-            }
-            return Err(perr);
+        match parser.parse_line() {
+            Ok(line) => builder.push_line(line),
+            Err(perr) if perr.is_eof() => return Ok(builder.finish()),
+            Err(perr) => return Err(perr),
         }
-        builder.push_line(&line);
     }
 }
 
 /// Parse a [Method] out of the [LineParse]
 ///
 /// Note that this function will silently drop [Line]s until the first [Line::MethodHeader]
-pub fn parse_method<'a, P: LineParse<'a>>(parser: &mut P) -> ParseResultT<'a, Option<Method<'a>>> {
-    let mut line = Line::Empty;
+pub fn parse_method<'a, P: LineParse<'a>>(parser: &mut P) -> ParseResult<'a, Option<Method<'a>>> {
     loop {
-        let res = parser.parse_line_into(&mut line);
-        if let Err(perr) = res {
-            if perr.is_eof() {
-                return Ok(None);
-            }
-            return Err(perr);
-        }
+        let line = match parser.parse_line() {
+            Ok(line) => line,
+            Err(perr) if perr.is_eof() => return Ok(None),
+            Err(perr) => return Err(perr),
+        };
 
         if let Line::MethodHeader(mh) = &line {
             let mut builder = MethodLineBuilder::new(mh);
             loop {
-                parser.parse_line_into(&mut line)?;
+                let line = parser.parse_line()?;
                 if matches!(line, Line::MethodEnd) {
                     return Ok(Some(builder.finish()));
                 }
-                builder.push_line(&line);
+                builder.push_line(line);
             }
         }
     }
@@ -119,33 +111,28 @@ impl<'lex, L> LineParse<'lex> for Parser<'lex, L>
 where
     L: Lex<'lex>,
 {
-    fn parse_line_into(&mut self, into: &mut Line<'lex>) -> ParseResult<'lex> {
-        if self.cached_annotations.len() > 0 {
-            let ann = &self.cached_annotations[0];
-            *into = Line::Annotation(ann.clone());
-            let rem = self.cached_annotations.split_off(1);
-            self.cached_annotations = rem;
-            return Ok(());
+    fn parse_line(&mut self) -> ParseResult<'lex, Line<'lex>> {
+        if let Some(ann) = self.cached_annotations.pop() {
+            return Ok(Line::Annotation(ann));
         }
         self.lex_next()?;
         match self.token {
-            Token::Directive(dir) => self.parse_directive_into_line(dir, into),
-            Token::Instruction(ins) => self.parse_instruction_into_line(ins, into),
+            Token::Directive(dir) => self.parse_directive(dir),
+            Token::Instruction(ins) => self.parse_instruction(ins),
             Token::Colon => {
                 // We do further processing on certain labels
                 let label = self.parse_label()?;
                 if label.is_array() {
                     self.lex_token_expect(Token::Directive(Directive::ArrayData))?;
-                    self.parse_array_data(label, into)
+                    self.parse_array_data(label)
                 } else if label.is_sparse_switch_data() {
                     self.lex_token_expect(Token::Directive(Directive::SparseSwitch))?;
-                    self.parse_sparse_switch(label, into)
+                    self.parse_sparse_switch(label)
                 } else if label.is_packed_switch_data() {
                     self.lex_token_expect(Token::Directive(Directive::PackedSwitch))?;
-                    self.parse_packed_switch(label, into)
+                    self.parse_packed_switch(label)
                 } else {
-                    *into = Line::LabelDefinition(label);
-                    Ok(())
+                    Ok(Line::LabelDefinition(label))
                 }
             }
             _ => Err(ParseError::UnexpectedToken(
@@ -155,22 +142,21 @@ where
         }
     }
 
-    fn skip_to_next_method(&mut self, into: &mut Line<'lex>) -> ParseResult<'lex> {
+    fn skip_to_next_method(&mut self) -> ParseResult<'lex, Line<'lex>> {
         self.peek_next()?;
         if let Token::Directive(Directive::Method) = self.token {
             self.consume_peek();
-            self.parse_method_header(into)?;
-            return Ok(());
+            return self.parse_method_header();
         }
         self.lexer.skip_to_next_method()?;
         self.consume_peek();
-        self.parse_method_header(into)
+        self.parse_method_header()
     }
 }
 
 macro_rules! parse_tok_return {
     ($fn:ident, $ty:ty, $tok_ty:ident) => {
-        fn $fn(&mut self) -> ParseResultT<'lex, $ty> {
+        fn $fn(&mut self) -> ParseResult<'lex, $ty> {
             self.lex_next()?;
             if let Token::$tok_ty(val) = self.token {
                 Ok(val)
@@ -234,11 +220,7 @@ where
         self.peeked = false;
     }
 
-    fn parse_directive_into_line(
-        &mut self,
-        dir: Directive,
-        into: &mut Line<'lex>,
-    ) -> ParseResult<'lex> {
+    fn parse_directive(&mut self, dir: Directive) -> ParseResult<'lex, Line<'lex>> {
         match dir {
             Directive::Class => {
                 let mut acc = AccessFlag::UNSET;
@@ -250,8 +232,7 @@ where
                         }
                         Token::ClassDescriptor(clazz) => {
                             acc.ensure_access();
-                            *into = Line::Class(acc, clazz);
-                            return Ok(());
+                            return Ok(Line::Class(acc, clazz));
                         }
                         _ => unexpected_tok!(self),
                     }
@@ -259,41 +240,31 @@ where
             }
             Directive::Super => {
                 let name = self.parse_class_name()?;
-                *into = Line::Super(name);
-                Ok(())
+                Ok(Line::Super(name))
             }
             Directive::Implements => {
                 let name = self.parse_class_name()?;
-                *into = Line::Interface(name);
-                Ok(())
+                Ok(Line::Interface(name))
             }
-            Directive::Catch => self.parse_catch(into),
-            Directive::CatchAll => self.parse_catch_all(into),
-            Directive::Param => self.parse_param(into),
-            Directive::Method => self.parse_method_header(into),
-            Directive::Field => self.parse_field_def(into),
+            Directive::Catch => self.parse_catch(),
+            Directive::CatchAll => self.parse_catch_all(),
+            Directive::Param => self.parse_param(),
+            Directive::Method => self.parse_method_header(),
+            Directive::Field => self.parse_field_def(),
             Directive::Annotation => {
                 let mut ann: Annotation = Default::default();
                 self.parse_annotation_into(&mut ann)?;
-                *into = Line::Annotation(ann);
-                Ok(())
+                Ok(Line::Annotation(ann))
             }
-            Directive::EndMethod => {
-                *into = Line::MethodEnd;
-                Ok(())
-            }
+            Directive::EndMethod => Ok(Line::MethodEnd),
             // See the comment over in RawArrayData::to_parsed. I didn't think this was valid
             // smali but I guess it is.
-            Directive::ArrayData => self.parse_array_data(RawLabel::new(""), into),
+            Directive::ArrayData => self.parse_array_data(RawLabel::new("")),
             _ => unexpected_tok!(self),
         }
     }
 
-    fn parse_array_data(
-        &mut self,
-        label: RawLabel<'lex>,
-        into: &mut Line<'lex>,
-    ) -> ParseResult<'lex> {
+    fn parse_array_data(&mut self, label: RawLabel<'lex>) -> ParseResult<'lex, Line<'lex>> {
         let mut data = RawArrayData {
             label,
             data_size: self.parse_numeric()?,
@@ -303,8 +274,7 @@ where
             self.lex_next()?;
             match self.token {
                 Token::Directive(Directive::EndArrayData) => {
-                    *into = Line::ArrayData(data);
-                    return Ok(());
+                    return Ok(Line::ArrayData(data));
                 }
                 Token::NumericLiteral(num) => {
                     data.data.push(num);
@@ -314,7 +284,7 @@ where
         }
     }
 
-    fn parse_catch(&mut self, into: &mut Line<'lex>) -> ParseResult<'lex> {
+    fn parse_catch(&mut self) -> ParseResult<'lex, Line<'lex>> {
         let mut catch = RawNamedCatch {
             class: self.parse_class_name()?,
             ..Default::default()
@@ -328,22 +298,16 @@ where
         expect!(self, CloseBrace);
         expect!(self, Colon);
         catch.dest_label = self.parse_label()?;
-        *into = Line::NamedCatch(catch);
-        Ok(())
+        Ok(Line::NamedCatch(catch))
     }
 
-    fn parse_sparse_switch(
-        &mut self,
-        label: RawLabel<'lex>,
-        into: &mut Line<'lex>,
-    ) -> ParseResult<'lex> {
+    fn parse_sparse_switch(&mut self, label: RawLabel<'lex>) -> ParseResult<'lex, Line<'lex>> {
         let mut data = RawSparseSwitchData::new(label);
         loop {
             self.lex_next()?;
             match self.token {
                 Token::Directive(Directive::EndSparseSwitch) => {
-                    *into = Line::SparseSwitchData(data);
-                    break;
+                    return Ok(Line::SparseSwitchData(data));
                 }
                 Token::NumericLiteral(num) => {
                     expect!(self, Arrow);
@@ -357,22 +321,16 @@ where
                 _ => unexpected_tok!(self),
             }
         }
-        Ok(())
     }
 
-    fn parse_packed_switch(
-        &mut self,
-        label: RawLabel<'lex>,
-        into: &mut Line<'lex>,
-    ) -> ParseResult<'lex> {
+    fn parse_packed_switch(&mut self, label: RawLabel<'lex>) -> ParseResult<'lex, Line<'lex>> {
         let raw_num = self.parse_numeric()?;
         let mut data = RawPackedSwitchData::new(label, raw_num);
         loop {
             self.lex_next()?;
             match self.token {
                 Token::Directive(Directive::EndPackedSwitch) => {
-                    *into = Line::PackedSwitchData(data);
-                    break;
+                    return Ok(Line::PackedSwitchData(data));
                 }
                 Token::Colon => {
                     let lab = self.expect_simple_name()?;
@@ -381,10 +339,9 @@ where
                 _ => unexpected_tok!(self),
             }
         }
-        Ok(())
     }
 
-    fn parse_catch_all(&mut self, into: &mut Line<'lex>) -> ParseResult<'lex> {
+    fn parse_catch_all(&mut self) -> ParseResult<'lex, Line<'lex>> {
         expect!(self, OpenBrace);
         expect!(self, Colon);
 
@@ -398,8 +355,7 @@ where
         expect!(self, CloseBrace);
         expect!(self, Colon);
         catch.dest_label = self.parse_label()?;
-        *into = Line::CatchAll(catch);
-        Ok(())
+        Ok(Line::CatchAll(catch))
     }
 
     parse_tok_return!(expect_simple_name, &'lex str, SimpleName);
@@ -418,7 +374,7 @@ where
         Ok(())
     }
 
-    fn parse_type(&mut self) -> ParseResultT<'lex, Type<'lex>> {
+    fn parse_type(&mut self) -> ParseResult<'lex, Type<'lex>> {
         let mut dim = 0;
         loop {
             self.lex_next()?;
@@ -437,7 +393,7 @@ where
         }
     }
 
-    fn parse_field_def(&mut self, into: &mut Line<'lex>) -> ParseResult<'lex> {
+    fn parse_field_def(&mut self) -> ParseResult<'lex, Line<'lex>> {
         let mut field: Field = Default::default();
 
         loop {
@@ -460,8 +416,7 @@ where
         field.ty = self.parse_type()?;
         // We're allowed to EOF with a field
         if let Err(ParseError::Lex(LexError::EOF)) = self.peek_next() {
-            *into = Line::Field(field);
-            return Ok(());
+            return Ok(Line::Field(field));
         }
         match self.token {
             // Parse the annotation(s) and apply it/them
@@ -471,14 +426,12 @@ where
                 self.parse_annotation_into(&mut ann)?;
                 field.annotations.push(ann);
                 if let Err(ParseError::Lex(LexError::EOF)) = self.peek_next() {
-                    *into = Line::Field(field);
-                    return Ok(());
+                    return Ok(Line::Field(field));
                 }
                 if let Token::Directive(d) = self.token {
                     if d == Directive::EndField {
                         self.consume_peek();
-                        *into = Line::Field(field);
-                        return Ok(());
+                        return Ok(Line::Field(field));
                     } else if d != Directive::Annotation {
                         unexpected_tok!(self);
                     }
@@ -494,8 +447,7 @@ where
                 if let Token::Directive(Directive::EndField) = self.token {
                     self.consume_peek();
                 }
-                *into = Line::Field(field);
-                return Ok(());
+                return Ok(Line::Field(field));
             }
         }
         self.lex_next()?;
@@ -507,8 +459,7 @@ where
         // Can have an annotation here too
         // We're allowed to EOF with a field
         if let Err(ParseError::Lex(LexError::EOF)) = self.peek_next() {
-            *into = Line::Field(field);
-            return Ok(());
+            return Ok(Line::Field(field));
         }
         match self.token {
             // Parse the annotation(s) and apply it/them
@@ -518,14 +469,12 @@ where
                 self.parse_annotation_into(&mut ann)?;
                 field.annotations.push(ann);
                 if let Err(ParseError::Lex(LexError::EOF)) = self.peek_next() {
-                    *into = Line::Field(field);
-                    return Ok(());
+                    return Ok(Line::Field(field));
                 }
                 if let Token::Directive(d) = self.token {
                     if d == Directive::EndField {
                         self.consume_peek();
-                        *into = Line::Field(field);
-                        return Ok(());
+                        return Ok(Line::Field(field));
                     } else if d != Directive::Annotation {
                         unexpected_tok!(self);
                     }
@@ -538,10 +487,9 @@ where
                 // noop
             }
         }
-        *into = Line::Field(field);
-        Ok(())
+        Ok(Line::Field(field))
     }
-    fn parse_method_header(&mut self, into: &mut Line<'lex>) -> ParseResult<'lex> {
+    fn parse_method_header(&mut self) -> ParseResult<'lex, Line<'lex>> {
         let mut hdr: MethodHeader = Default::default();
         loop {
             self.lex_next()?;
@@ -559,8 +507,7 @@ where
         hdr.args = self.expect_method_args()?;
         hdr.return_type = self.parse_type()?;
         // Parameter annotations?
-        *into = Line::MethodHeader(hdr);
-        Ok(())
+        Ok(Line::MethodHeader(hdr))
     }
 
     fn parse_method_ref(&mut self, into: &mut MethodRef<'lex>) -> ParseResult<'lex> {
@@ -599,7 +546,7 @@ where
         self.parse_sub_or_annotation_into(Directive::EndAnnotation, into)
     }
 
-    fn parse_nested_annotation_list(&mut self) -> ParseResultT<'lex, AnnotationValue<'lex>> {
+    fn parse_nested_annotation_list(&mut self) -> ParseResult<'lex, AnnotationValue<'lex>> {
         // We already ate the {
 
         let mut v: Vec<AnnotationValue> = Vec::new();
@@ -649,7 +596,7 @@ where
                             v.push(value);
                         }
                         Token::CloseBrace => {
-                            into.parameters.insert(key, AnnotationValue::List(v));
+                            into.insert(key, AnnotationValue::List(v));
                             break;
                         }
                         Token::Comma => continue,
@@ -677,19 +624,17 @@ where
                 }
             }
             Token::ArrayTypePrefix => {
-                let mut dim: usize = 1;
+                let mut dim: u8 = 1;
                 loop {
                     self.lex_next()?;
                     match self.token {
                         Token::ArrayTypePrefix => dim += 1,
                         Token::ClassDescriptor(cd) => {
-                            into.parameters
-                                .insert(key, AnnotationValue::Type(Type::new_class_array(cd, dim)));
+                            into.insert(key, AnnotationValue::Type(Type::new_class_array(cd, dim)));
                             break;
                         }
                         Token::PrimitiveType(p) => {
-                            into.parameters
-                                .insert(key, AnnotationValue::Type(Type::new_prim_array(p, dim)));
+                            into.insert(key, AnnotationValue::Type(Type::new_prim_array(p, dim)));
                             break;
                         }
                         _ => {
@@ -701,12 +646,12 @@ where
             Token::Directive(Directive::Subannotation) => {
                 let mut subann: Annotation = Default::default();
                 self.parse_subannotation_into(&mut subann)?;
-                into.parameters.insert(key, subann.into());
+                into.insert(key, subann.into());
             }
             Token::Directive(Directive::Enum) => {
                 let mut en: Enum = Default::default();
                 self.parse_enum(&mut en)?;
-                into.parameters.insert(key, en.into());
+                into.insert(key, en.into());
             }
             Token::ClassDescriptor(cd) => {
                 self.peek_next()?;
@@ -716,21 +661,20 @@ where
                     let name = self.expect_simple_name()?;
                     let args = self.expect_method_args()?;
                     let ret_type = self.parse_type()?;
-                    into.parameters.insert(
+                    into.insert(
                         key,
                         AnnotationValue::Method(MethodRef::new(cd, name, args, ret_type)),
                     );
                 } else {
-                    into.parameters
-                        .insert(key, AnnotationValue::Type(Type::new_class(cd)));
+                    into.insert(key, AnnotationValue::Type(Type::new_class(cd)));
                 }
             }
             Token::PrimitiveType(p) => {
-                into.parameters.insert(key, p.into());
+                into.insert(key, p.into());
             }
             _ => {
                 if let Some(raw) = RawLiteral::from_token(&self.token) {
-                    into.parameters.insert(key, raw.into());
+                    into.insert(key, raw.into());
                 } else {
                     unexpected_tok!(self);
                 }
@@ -779,7 +723,7 @@ where
         }
     }
 
-    fn parse_param(&mut self, into: &mut Line<'lex>) -> ParseResult<'lex> {
+    fn parse_param(&mut self) -> ParseResult<'lex, Line<'lex>> {
         let reg = self.parse_register()?;
         self.peek_next()?;
         // In the case where there is no comma we should be pretty sure below
@@ -806,31 +750,29 @@ where
                         annotations.push(ann);
                     }
                     Directive::EndParam => {
-                        if annotations.len() > 0 {
-                            // They belonged to the param
-                            *into = Line::ParamLine(reg, name, Some(annotations));
-                        } else {
-                            *into = Line::ParamLine(reg, name, None);
-                        }
                         self.consume_peek();
-                        break;
+                        return Ok(if annotations.len() > 0 {
+                            // They belonged to the param
+                            Line::ParamLine(reg, name, Some(annotations))
+                        } else {
+                            Line::ParamLine(reg, name, None)
+                        });
                     }
                     // Any other directive means that they actually belonged
                     // to the method
                     _ => {
                         self.cached_annotations = annotations;
-                        *into = Line::ParamLine(reg, name, None);
-                        break;
+                        self.cached_annotations.reverse();
+                        return Ok(Line::ParamLine(reg, name, None));
                     }
                 }
             } else {
                 // Once again means they probably didn't belong to the param
                 self.cached_annotations = annotations;
-                *into = Line::ParamLine(reg, name, None);
-                break;
+                self.cached_annotations.reverse();
+                return Ok(Line::ParamLine(reg, name, None));
             }
         }
-        Ok(())
     }
 
     fn parse_enum(&mut self, into: &mut Enum<'lex>) -> ParseResult<'lex> {
@@ -857,11 +799,7 @@ where
         Ok(())
     }
 
-    fn parse_instruction_into_line(
-        &mut self,
-        ins: Instruction,
-        into: &mut Line<'lex>,
-    ) -> ParseResult<'lex> {
+    fn parse_instruction(&mut self, ins: Instruction) -> ParseResult<'lex, Line<'lex>> {
         let args = match ins.fmt() {
             InsBits::CFMT_BARE => InvArgs::Bare,
             InsBits::CFMT_REG => InvArgs::OneReg(self.parse_register()?),
@@ -981,11 +919,10 @@ where
             }
             _ => todo!(),
         };
-        *into = Line::InstructionInvocation(Invocation::new(ins, args));
-        Ok(())
+        Ok(Line::InstructionInvocation(Invocation::new(ins, args)))
     }
 
-    fn parse_label(&mut self) -> ParseResultT<'lex, RawLabel<'lex>> {
+    fn parse_label(&mut self) -> ParseResult<'lex, RawLabel<'lex>> {
         self.lex_next()?;
         if let Token::SimpleName(ref name) = self.token {
             Ok(RawLabel::new(name))
@@ -994,7 +931,7 @@ where
         }
     }
 
-    fn parse_variable_registers(&mut self) -> ParseResultT<'lex, VarRegister> {
+    fn parse_variable_registers(&mut self) -> ParseResult<'lex, VarRegister> {
         expect!(self, OpenBrace);
         self.lex_next()?;
         let first = match self.token {
@@ -1089,10 +1026,9 @@ mod test {
             let smali_line = $s.as_bytes();
             let lexer = Lexer::new(smali_line, &arena);
             let mut parser = Parser::new(lexer);
-            let mut line = Line::Empty;
-            let res = parser.parse_line_into(&mut line);
+            let res = parser.parse_line();
             assert!(res.is_ok(), "expected no error: {:?}", res);
-            $fn(&line);
+            $fn(&res.unwrap());
         }};
     }
 
@@ -1333,13 +1269,9 @@ mod test {
             vis: $vis:ident,
             params: {$($key:literal = $value:expr),*}
         ) => {{
-            let mut __ann = Annotation{
-                class: $class,
-                visibility: AnnotationVisibility::$vis,
-                parameters: std::collections::HashMap::new(),
-            };
+            let mut __ann = Annotation::new($class, AnnotationVisibility::$vis);
             $(
-                __ann.parameters.insert($key, $value.into());
+                __ann.insert($key, $value.into());
             )*
             __ann
         }};
@@ -1728,10 +1660,9 @@ mod test {
 
     macro_rules! assert_next_line {
         ($parser:ident, $expected:expr) => {{
-            let mut __line = Line::Empty;
-            let res = $parser.parse_line_into(&mut __line);
+            let res = $parser.parse_line();
             assert!(res.is_ok(), "expected no error: {:?}", res);
-            assert_eq!(__line, $expected);
+            assert_eq!(res.unwrap(), $expected);
         }};
     }
 

@@ -1,43 +1,59 @@
-use crate::utils::ptr_eq;
 use crate::{Label, RawLabel};
-use std::collections::HashMap;
 
-/// All switch data parses into the same type which is just a map of
-/// label -> data.
-#[derive(Debug, Clone)]
+/// A single `key -> label` entry of a packed or sparse switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub struct SwitchCase {
+    pub key: i32,
+    pub label: Label,
+}
+
+/// All switch data parses into the same type: the ordered list of cases.
+///
+/// Several keys may target the same [Label] Cases are kept in source order, which for a packed
+/// switch means ascending key order.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SwitchData {
     pub label_id: u32,
-    map: HashMap<Label, isize>,
+    cases: Vec<SwitchCase>,
 }
 
 impl std::ops::Deref for SwitchData {
-    type Target = HashMap<Label, isize>;
+    type Target = [SwitchCase];
 
     fn deref(&self) -> &Self::Target {
-        &self.map
-    }
-}
-
-impl std::ops::DerefMut for SwitchData {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.map
-    }
-}
-
-impl PartialEq for SwitchData {
-    fn eq(&self, oth: &SwitchData) -> bool {
-        if ptr_eq(self, oth) || ptr_eq(&self.map, &oth.map) {
-            return true;
-        }
-        self.label_id == oth.label_id && self.map == oth.map
+        &self.cases
     }
 }
 
 impl SwitchData {
-    #[inline(always)]
-    pub const fn get_data(&self) -> &HashMap<Label, isize> {
-        &self.map
+    /// The cases in source order.
+    #[inline]
+    pub fn cases(&self) -> &[SwitchCase] {
+        &self.cases
+    }
+
+    /// The label a given key branches to, if the key is present.
+    pub fn label_for(&self, key: i32) -> Option<Label> {
+        self.cases
+            .iter()
+            .find(|case| case.key == key)
+            .map(|case| case.label)
+    }
+
+    /// Every key that branches to `label`.
+    pub fn keys_for(&self, label: Label) -> impl Iterator<Item = i32> + '_ {
+        self.cases
+            .iter()
+            .filter(move |case| case.label == label)
+            .map(|case| case.key)
+    }
+
+    /// Every branch target in source order. A label appears once per case, so
+    /// callers building a CFG should deduplicate.
+    pub fn targets(&self) -> impl Iterator<Item = Label> + '_ {
+        self.cases.iter().map(|case| case.label)
     }
 }
 
@@ -87,30 +103,39 @@ impl<'a> RawPackedSwitchData<'a> {
     }
 }
 
-fn parse_num(snum: &str) -> Option<isize> {
-    let is_neg = snum.as_bytes()[0] == b'-';
-    if is_neg {
-        let raw = snum.trim_start_matches("-0x");
-        isize::from_str_radix(raw, 16).map(|s| -s).ok()
-    } else {
-        let raw = snum.trim_start_matches("0x");
-        isize::from_str_radix(raw, 16).ok()
-    }
+/// Parse a switch key. Dex switch keys are 32 bit signed, so anything that
+/// doesn't fit is rejected rather than truncated.
+fn parse_num(snum: &str) -> Option<i32> {
+    let (is_neg, rest) = match snum.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, snum),
+    };
+    let digits = rest.strip_prefix("0x").unwrap_or(rest);
+    let magnitude = i64::from(u32::from_str_radix(digits, 16).ok()?);
+    let value = if is_neg { -magnitude } else { magnitude };
+    i32::try_from(value).ok()
+}
+
+/// The numeric suffix of a `:pswitch_data_N` or `:sswitch_data_N` label.
+fn parse_label_id(label: &RawLabel) -> Option<u32> {
+    u32::from_str_radix(label.split('_').nth(2)?, 16).ok()
 }
 
 impl<'a> RawPackedSwitchData<'a> {
     pub fn to_parsed(&self) -> Option<SwitchData> {
-        let num = self.label.split('_').nth(2)?;
-        let lbl_val = u32::from_str_radix(num, 16).ok()?;
-        let num = parse_num(self.start)?;
-        let mut data = SwitchData {
-            label_id: lbl_val,
-            map: HashMap::new(),
-        };
-        for (i, lab) in self.labels.iter().enumerate() {
-            data.insert(lab.to_label()?, i as isize + num);
+        let label_id = parse_label_id(&self.label)?;
+        let start = parse_num(self.start)?;
+
+        let mut cases = Vec::with_capacity(self.labels.len());
+        for (offset, label) in self.labels.iter().enumerate() {
+            let key = start.checked_add(i32::try_from(offset).ok()?)?;
+            cases.push(SwitchCase {
+                key,
+                label: label.to_label()?,
+            });
         }
-        Some(data)
+
+        Some(SwitchData { label_id, cases })
     }
 
     #[inline]
@@ -123,18 +148,17 @@ impl<'a> RawPackedSwitchData<'a> {
 
 impl<'a> RawSparseSwitchData<'a> {
     pub fn to_parsed(&self) -> Option<SwitchData> {
-        let num = self.label.split('_').nth(2)?;
-        let lbl_val = u32::from_str_radix(num, 16).ok()?;
-        let mut data = SwitchData {
-            label_id: lbl_val,
-            map: HashMap::new(),
-        };
-        for d in &self.data {
-            let num = parse_num(d.num)?;
-            let lab = d.label.to_label()?;
-            data.insert(lab, num);
+        let label_id = parse_label_id(&self.label)?;
+
+        let mut cases = Vec::with_capacity(self.data.len());
+        for pair in &self.data {
+            cases.push(SwitchCase {
+                key: parse_num(pair.num)?,
+                label: pair.label.to_label()?,
+            });
         }
-        Some(data)
+
+        Some(SwitchData { label_id, cases })
     }
 
     #[inline]
@@ -145,35 +169,77 @@ impl<'a> RawSparseSwitchData<'a> {
     }
 }
 
-/*
-impl<'a> RawSwitchData<'a> {
-    pub fn to_parsed(&self) -> Option<SwitchData> {
-        todo!();
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn packed(start: &'static str, labels: &[&'static str]) -> SwitchData {
+        let mut raw = RawPackedSwitchData::new(RawLabel::new("pswitch_data_0"), start);
+        raw.labels = labels.iter().map(|l| RawLabel::new(l)).collect();
+        raw.to_parsed().expect("failed to parse packed switch")
     }
 
-    fn to_parsed_sparsed(pairs: &Vec<RawSwitchPair<'a>>) -> Option<SwitchData> {
-        todo!();
+    fn sparse(pairs: &[(&'static str, &'static str)]) -> SwitchData {
+        let mut raw = RawSparseSwitchData::new(RawLabel::new("sswitch_data_0"));
+        raw.data = pairs
+            .iter()
+            .map(|(num, label)| RawSwitchPair {
+                num,
+                label: RawLabel::new(label),
+            })
+            .collect();
+        raw.to_parsed().expect("failed to parse sparse switch")
     }
 
-    fn to_parsed_packed(num: &'a str, labels: &Vec<RawLabel<'a>>) -> Option<SwitchData> {
-        todo!();
-        //let is_neg = self.num.as_bytes()[0] == b'-';
-        //let num = if is_neg {
-        //    let raw = self.num.trim_start_matches("-0x");
-        //    -isize::from_str_radix(self.num, 16).ok()?
-        //} else {
-        //    let raw = self.num.trim_start_matches("0x");
-        //    isize::from_str_radix(self.num, 16).ok()
-        //};
-        //Some(SwitchData {
-        //    num,
-        //    label: self.label.to_label(),
-        //})
+    #[test]
+    fn packed_keys_ascend_from_start() {
+        let data = packed("0x1", &["pswitch_0", "pswitch_1", "pswitch_2"]);
+        assert_eq!(data.label_id, 0);
+        let keys: Vec<i32> = data.cases().iter().map(|c| c.key).collect();
+        assert_eq!(keys, vec![1, 2, 3]);
+        assert_eq!(data.label_for(2), Some(Label::PackedSwitch(1)));
+        assert_eq!(data.label_for(9), None);
     }
 
-    #[inline]
-    pub fn to_parsed_unchecked(&self) -> SwitchData {
-        self.to_parsed().expect("unchecked call failed")
+    #[test]
+    fn packed_negative_start() {
+        let data = packed("-0x2", &["pswitch_0", "pswitch_1"]);
+        let keys: Vec<i32> = data.cases().iter().map(|c| c.key).collect();
+        assert_eq!(keys, vec![-2, -1]);
+    }
+
+    #[test]
+    fn duplicate_targets_keep_every_key() {
+        // The map-keyed-by-label representation used to drop keys 1 and 2 here.
+        let data = packed("0x1", &["pswitch_0", "pswitch_1", "pswitch_0"]);
+        assert_eq!(data.cases().len(), 3);
+        let keys: Vec<i32> = data.keys_for(Label::PackedSwitch(0)).collect();
+        assert_eq!(keys, vec![1, 3]);
+        let targets: Vec<Label> = data.targets().collect();
+        assert_eq!(
+            targets,
+            vec![
+                Label::PackedSwitch(0),
+                Label::PackedSwitch(1),
+                Label::PackedSwitch(0)
+            ]
+        );
+    }
+
+    #[test]
+    fn sparse_preserves_source_order() {
+        let data = sparse(&[("0x0", "sswitch_0"), ("0x64", "sswitch_1")]);
+        let keys: Vec<i32> = data.cases().iter().map(|c| c.key).collect();
+        assert_eq!(keys, vec![0, 100]);
+        assert_eq!(data.label_for(100), Some(Label::SparseSwitch(1)));
+    }
+
+    #[test]
+    fn keys_outside_i32_are_rejected() {
+        assert_eq!(parse_num("0x7fffffff"), Some(i32::MAX));
+        assert_eq!(parse_num("-0x80000000"), Some(i32::MIN));
+        assert_eq!(parse_num("0x80000000"), None);
+        assert_eq!(parse_num("-0x80000001"), None);
+        assert_eq!(parse_num(""), None);
     }
 }
-*/

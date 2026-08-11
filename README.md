@@ -18,3 +18,5 @@ All comments and certain directives from the files are ignored. The following di
 - `.restart local`
 
 Since we assume valid input smali, some tokens are matched with the shortest possible amount of characters. For example, the `new-array` instruction is matched after only the `new-a` as there are no other instructions that start with that prefix. Many things are matched this way.
+
+Without the `big-registers` feature, this create can only handle registers up to `0x7FFF`. Technically, dex allows `0xFFFF` registers, but this requires double the storage space for a `Register` type (`u32` vs `u16`). If you're fine with that trade off, enable `big-registers`.

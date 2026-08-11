@@ -178,7 +178,7 @@ fn push(regs: &mut [Register; MAX_FIXED_REGISTERS], len: &mut usize, reg: Regist
     regs[*len] = reg;
     *len += 1;
     if pair {
-        regs[*len] = Register::new(reg.is_param(), reg.num() + 1);
+        regs[*len] = Register::from_raw(reg.is_param(), reg.num() + 1);
         *len += 1;
     }
 }
@@ -226,10 +226,10 @@ mod test {
 
     macro_rules! reg {
         (p $lit:literal) => {
-            Register::new(true, $lit as usize)
+            crate::Register::new(true, u16::try_from($lit).unwrap()).unwrap()
         };
         (v $lit:literal) => {
-            Register::new(false, $lit as usize)
+            crate::Register::new(false, u16::try_from($lit).unwrap()).unwrap()
         };
     }
 

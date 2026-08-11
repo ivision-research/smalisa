@@ -8,7 +8,6 @@ use crate::{
     AccessFlag, Annotation, ArrayData, Catch, Label, Line, ParamAnnotations, Primitive, SwitchData,
     Type,
 };
-use smallvec::SmallVec;
 pub fn parse_method_args_into<'a>(args: &'a str, into: &mut Vec<Type<'a>>) -> Result<(), &'a str> {
     if args.is_empty() {
         return Ok(());
@@ -91,11 +90,7 @@ pub struct MethodRef<'a> {
     pub args: &'a str,
     #[cfg_attr(feature = "serde", serde(borrow))]
     pub return_type: Type<'a>,
-
-    #[cfg_attr(feature = "serde", serde(skip))]
-    input_params: Option<Vec<Type<'a>>>,
-
-    pub(crate) class_array_dim: usize,
+    pub(crate) class_array_dim: u8,
 }
 
 impl<'a> Hash for MethodRef<'a> {
@@ -104,7 +99,6 @@ impl<'a> Hash for MethodRef<'a> {
         self.name.hash(state);
         self.args.hash(state);
         self.class_array_dim.hash(state);
-        // Ignore input params because they're derived from args
     }
 }
 
@@ -115,7 +109,6 @@ impl<'a> MethodRef<'a> {
             name,
             args,
             return_type: ret,
-            input_params: None,
             class_array_dim: 0,
         }
     }
@@ -131,7 +124,7 @@ impl<'a> MethodRef<'a> {
     /// field though.
     pub fn full_class_str(&self) -> Cow<'a, str> {
         if self.class_array_dim > 0 {
-            let mut s = "[".repeat(self.class_array_dim);
+            let mut s = "[".repeat(self.class_array_dim as usize);
             s.push_str(self.class);
             Cow::Owned(s)
         } else {
@@ -139,21 +132,12 @@ impl<'a> MethodRef<'a> {
         }
     }
 
-    /// Used to get input arguments as a vec and optionally parse them.
-    pub fn get_or_parse_input_args(&mut self) -> Option<&Vec<Type<'a>>> {
+    pub fn parse_input_args(&self) -> Result<Vec<Type<'a>>, &'a str> {
         if self.args.is_empty() {
-            return None;
-        } else if self.input_params.is_some() {
-            return self.input_params.as_ref();
+            Ok(Vec::new())
+        } else {
+            parse_method_args(self.args)
         }
-        self.input_params = parse_method_args(self.args).ok();
-        self.input_params.as_ref()
-    }
-
-    /// Used to get input arguments when they have already been parsed.
-    #[inline(always)]
-    pub fn get_input_args(&self) -> Option<&Vec<Type<'a>>> {
-        self.input_params.as_ref()
     }
 }
 
@@ -164,9 +148,6 @@ pub struct MethodHeader<'a> {
     pub access: AccessFlag,
     pub args: &'a str,
     pub return_type: Type<'a>,
-
-    #[cfg_attr(feature = "serde", serde(skip))]
-    input_params: Option<Vec<Type<'a>>>,
 }
 
 impl<'a> PartialEq for MethodHeader<'a> {
@@ -191,25 +172,15 @@ impl<'a> MethodHeader<'a> {
             access,
             args,
             return_type: ret,
-            input_params: None,
         }
     }
 
-    /// Used to get input arguments as a vec and optionally parse them.
-    pub fn get_or_parse_input_args(&mut self) -> Option<&Vec<Type<'a>>> {
+    pub fn parse_input_args(&mut self) -> Result<Vec<Type<'a>>, &'a str> {
         if self.args.is_empty() {
-            return None;
-        } else if self.input_params.is_some() {
-            return self.input_params.as_ref();
+            Ok(Vec::new())
+        } else {
+            parse_method_args(self.args)
         }
-        self.input_params = parse_method_args(self.args).ok();
-        self.input_params.as_ref()
-    }
-
-    /// Used to get input arguments when they have already been parsed.
-    #[inline(always)]
-    pub fn get_input_args(&self) -> Option<&Vec<Type<'a>>> {
-        self.input_params.as_ref()
     }
 }
 
@@ -237,7 +208,7 @@ impl<'a> Default for MethodLine<'a> {
 pub struct Method<'a> {
     #[cfg_attr(feature = "serde", serde(borrow))]
     pub header: MethodHeader<'a>,
-    pub annotations: SmallVec<[Annotation<'a>; 4]>,
+    pub annotations: Vec<Annotation<'a>>,
     #[cfg_attr(feature = "serde", serde(borrow))]
     pub param_annotations: Option<Vec<ParamAnnotations<'a>>>,
 
@@ -280,14 +251,14 @@ impl<'a> MethodLineBuilder<'a> {
     /// This can be helpful for manually building Methods from [Line]s but note that this type is
     /// completely unaware of state: [Line::MethodEnd] and [Line::MethodHeader] are silently
     /// ignored. It is up to the driver to manage state correctly!
-    pub fn push_line(&mut self, line: &Line<'a>) {
+    pub fn push_line(&mut self, line: Line<'a>) {
         // TODO remove the _unchecked maybe
         match line {
-            Line::Annotation(ref ann) => {
-                self.annotations.push(ann.clone());
+            Line::Annotation(ann) => {
+                self.annotations.push(ann);
             }
-            Line::InstructionInvocation(ref inv) => {
-                self.lines.push(MethodLine::Instruction(inv.clone()));
+            Line::InstructionInvocation(inv) => {
+                self.lines.push(MethodLine::Instruction(inv));
             }
             Line::LabelDefinition(lab) => {
                 let parsed = lab.to_label_unchecked();
@@ -302,18 +273,18 @@ impl<'a> MethodLineBuilder<'a> {
                     catch.to_parsed_all_unchecked(),
                 )));
             }
-            Line::PackedSwitchData(ref psd) => {
+            Line::PackedSwitchData(psd) => {
                 self.packed_switch_data.push(psd.to_parsed_unchecked());
             }
-            Line::SparseSwitchData(ref ssd) => {
+            Line::SparseSwitchData(ssd) => {
                 self.sparse_switch_data.push(ssd.to_parsed_unchecked());
             }
-            Line::ArrayData(ref ad) => {
+            Line::ArrayData(ad) => {
                 self.array_data.push(ad.to_parsed_unchecked());
             }
-            Line::ParamLine(reg, name, ref annotations) => {
+            Line::ParamLine(reg, name, annotations) => {
                 if let Some(ann) = annotations {
-                    let pa = ParamAnnotations::new(*reg, name, ann.clone());
+                    let pa = ParamAnnotations::new(reg, name, ann);
                     if let Some(v) = &mut self.param_annotations {
                         v.push(pa);
                     } else {
