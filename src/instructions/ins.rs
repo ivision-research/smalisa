@@ -1867,6 +1867,11 @@ impl Instruction {
     }
 
     #[inline]
+    pub fn writes_result(self) -> bool {
+        self.0.contains(InsBits::ACTION_SETS_RESULT)
+    }
+
+    #[inline]
     pub fn reads_result(self) -> bool {
         self.0.contains(InsBits::ACTION_MOVE_RESULT)
     }
