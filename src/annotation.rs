@@ -19,6 +19,7 @@ impl Default for AnnotationVisibility {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub enum AnnotationValue<'a> {
     #[cfg_attr(feature = "serde", serde(borrow))]
     Lit(RawLiteral<'a>),
@@ -76,6 +77,7 @@ impl<'a> From<Enum<'a>> for AnnotationValue<'a> {
 
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct ParamAnnotations<'a> {
     pub register: Register,
     pub name: &'a str,
@@ -105,6 +107,7 @@ impl<'a> PartialEq for ParamAnnotations<'a> {
 
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct Annotation<'a> {
     pub class: &'a str,
     pub visibility: AnnotationVisibility,

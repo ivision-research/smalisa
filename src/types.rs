@@ -5,6 +5,7 @@ use crate::{PackageClass, Primitive};
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub enum Type<'a> {
     Unknown,
     Class(&'a str, u8),

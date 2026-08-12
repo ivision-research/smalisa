@@ -9,6 +9,7 @@ bitflags = "2.9"
 bumpalo = "3.17"
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"], optional = true }
+yoke = { version = "0.8", optional = true, features = ["derive"] }
 
 # Enable features when testing
 [dev-dependencies]
@@ -20,3 +21,4 @@ default = ["annotations", "serde"]
 annotations = []
 big-registers = []
 serde = ["dep:serde", "bitflags/serde"]
+yoke = ["dep:yoke"]

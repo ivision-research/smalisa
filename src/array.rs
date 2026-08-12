@@ -3,6 +3,7 @@ use crate::{NumericLiteral, RawLabel};
 
 #[derive(PartialEq, Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct ArrayData {
     pub label_id: u32,
     pub data_size: u8,
@@ -15,6 +16,7 @@ impl ArrayData {
 
 #[derive(PartialEq, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct RawArrayData<'a> {
     pub label: RawLabel<'a>,
     pub data_size: &'a str,

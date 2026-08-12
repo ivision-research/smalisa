@@ -5,6 +5,7 @@ use crate::{method::MethodLineBuilder, AccessFlag, Annotation, Field, Line, Meth
 /// Represents a fully parsed class.
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct Class<'a> {
     pub access: AccessFlag,
     pub name: &'a str,
@@ -83,6 +84,7 @@ impl<'a> ClassLineBuilder<'a> {
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct PackageClass<'a> {
     pub package: &'a str,
     pub name: &'a str,

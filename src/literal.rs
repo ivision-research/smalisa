@@ -29,6 +29,7 @@ impl<'a> From<NumericLiteral> for Literal<'a> {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub enum Literal<'a> {
     Null,
     Char(char),
@@ -61,6 +62,7 @@ impl<'a> fmt::Display for Literal<'a> {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub enum RawLiteral<'a> {
     Unset,
     Null,

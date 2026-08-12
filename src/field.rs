@@ -4,6 +4,7 @@ use crate::{AccessFlag, Annotation, Literal, RawLiteral, Type};
 
 #[derive(Debug, Default, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct FieldRef<'a> {
     pub class: &'a str,
     pub name: &'a str,
@@ -20,6 +21,7 @@ impl<'a> Hash for FieldRef<'a> {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct Field<'a> {
     pub name: &'a str,
     pub access: AccessFlag,

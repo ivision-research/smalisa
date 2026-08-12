@@ -6,6 +6,7 @@ use crate::{
 
 #[derive(PartialEq, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct Invocation<'a> {
     ins: Instruction,
     #[cfg_attr(feature = "serde", serde(borrow))]
@@ -185,6 +186,7 @@ fn push(regs: &mut [Register; MAX_FIXED_REGISTERS], len: &mut usize, reg: Regist
 
 #[derive(PartialEq, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub enum InvArgs<'a> {
     Bare,
 

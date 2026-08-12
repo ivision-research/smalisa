@@ -4,6 +4,7 @@ use std::ops::Deref;
 /// A raw label with the : removed.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct RawLabel<'a>(&'a str);
 
 impl<'a> From<&'a str> for RawLabel<'a> {

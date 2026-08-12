@@ -143,6 +143,7 @@ impl<'a> MethodRef<'a> {
 
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct MethodHeader<'a> {
     pub name: &'a str,
     pub access: AccessFlag,
@@ -205,6 +206,7 @@ impl<'a> Default for MethodLine<'a> {
 /// Represents a fully parsed method.
 #[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct Method<'a> {
     #[cfg_attr(feature = "serde", serde(borrow))]
     pub header: MethodHeader<'a>,
