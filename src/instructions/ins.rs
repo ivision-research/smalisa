@@ -1861,9 +1861,17 @@ impl Instruction {
         self.0.contains(InsBits::ACTION_CAN_THROW)
     }
 
+    /// The instruction is a simple move, this doesn't include move-result or move-exception
+    /// variants
     #[inline]
     pub fn is_move(self) -> bool {
         self.0.contains(InsBits::ACTION_MOVE)
+    }
+
+    /// The instruction is a move result variant
+    #[inline]
+    pub fn is_move_result(self) -> bool {
+        self.0.contains(InsBits::ACTION_MOVE_RESULT)
     }
 
     #[inline]
