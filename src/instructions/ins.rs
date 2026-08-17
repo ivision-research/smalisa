@@ -30,8 +30,12 @@ bitflags! {
         const FMT_VAR_REG = 1 << 59;
         /// The instruction uses a field
         const FMT_FIELD = 1 << 58;
-        /// The instruction uses a class
-        const FMT_CLASS = 1 << 57;
+        /// The instruction takes a type as an argument
+        ///
+        /// The definition for "type" in this format marker includes: `Lfoo/Bar;`, `[Lfoo/Bar;`, and
+        /// `[I` (arrays with arbitrary depth). Standalone primitive types such as `J` and `D` are
+        /// not included.
+        const FMT_TYPE = 1 << 57;
         /// The instruction uses an array
         const FMT_ARR = 1 << 56;
         /// The instruction uses a method
@@ -95,6 +99,9 @@ bitflags! {
         /// The third register is an implicit pair (v0 means v0 and v1)
         const PAIR_THIRD = 1 << 28;
 
+        /// The instruction uses a constant value
+        const ACTION_USES_CONST = 1 << 27;
+
         /// Combination of all action related bits
         const ACTION_MASK =
             mask!(
@@ -103,13 +110,13 @@ bitflags! {
                 ACTION_UNCOND_JUMP | ACTION_SWITCH | ACTION_RETURN | ACTION_CAN_THROW |
                 ACTION_INVOKE | ACTION_GETS_STATIC_FIELD | ACTION_GETS_INSTANCE_FIELD |
                 ACTION_GETS_ARRAY_ELEMENT | ACTION_MOVE | ACTION_MOVE_RESULT |
-                ACTION_INOUT
+                ACTION_INOUT | ACTION_USES_CONST
             );
 
         /// Combination of all format related bits
         const FMT_MASK  = mask!(
             FMT_LABEL | FMT_REG_A | FMT_REG_B | FMT_REG_C | FMT_VAR_REG |
-            FMT_FIELD | FMT_CLASS | FMT_ARR | FMT_METHOD | FMT_NUM | FMT_STR |
+            FMT_FIELD | FMT_TYPE | FMT_ARR | FMT_METHOD | FMT_NUM | FMT_STR |
             FMT_CATCH | FMT_SWITCH | FMT_BARE | FMT_POLYMORPHIC | FMT_INVOKE_CUSTOM
         );
 
@@ -127,8 +134,8 @@ bitflags! {
         const CFMT_REG_STR = Self::FMT_REG_A.bits() | Self::FMT_STR.bits();
         const CFMT_REG_FIELD = Self::FMT_REG_A.bits() | Self::FMT_FIELD.bits();
         const CFMT_REG_REG_FIELD = Self::FMT_REG_A.bits() | Self::FMT_REG_B.bits() | Self::FMT_FIELD.bits();
-        const CFMT_REG_CLASS = Self::FMT_REG_A.bits() | Self::FMT_CLASS.bits();
-        const CFMT_REG_REG_CLASS = Self::FMT_REG_A.bits() | Self::FMT_REG_B.bits() | Self::FMT_CLASS.bits();
+        const CFMT_REG_TYPE = Self::FMT_REG_A.bits() | Self::FMT_TYPE.bits();
+        const CFMT_REG_REG_TYPE = Self::FMT_REG_A.bits() | Self::FMT_REG_B.bits() | Self::FMT_TYPE.bits();
         const CFMT_REG_REG_ARR = Self::FMT_REG_A.bits() | Self::FMT_REG_B.bits() | Self::FMT_ARR.bits();
         const CFMT_ARGS_METHOD = Self::FMT_VAR_REG.bits() | Self::FMT_METHOD.bits();
         const CFMT_ARGS_METHOD_POLYMORPHIC = Self::FMT_VAR_REG.bits() | Self::FMT_METHOD.bits() | Self::FMT_POLYMORPHIC.bits();
@@ -199,49 +206,65 @@ ins!(INS_RETURN_OBJECT, 14, ACTION_RETURN | CFMT_REG);
 ins!(INS_RETURN_VOID_BARRIER, 15, ACTION_RETURN | CFMT_BARE);
 ins!(INS_RETURN_VOID_NO_BARRIER, 16, ACTION_RETURN | CFMT_BARE);
 ins!(INS_NOP, 17, CFMT_BARE);
-ins!(INS_CONST, 18, ACTION_SETS_REGISTER | CFMT_REG_NUM);
-ins!(INS_CONST_4, 19, ACTION_SETS_REGISTER | CFMT_REG_NUM);
-ins!(INS_CONST_16, 20, ACTION_SETS_REGISTER | CFMT_REG_NUM);
+ins!(
+    INS_CONST,
+    18,
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | CFMT_REG_NUM
+);
+ins!(
+    INS_CONST_4,
+    19,
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | CFMT_REG_NUM
+);
+ins!(
+    INS_CONST_16,
+    20,
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | CFMT_REG_NUM
+);
 ins!(
     INS_CONST_WIDE,
     21,
-    ACTION_SETS_REGISTER | CFMT_REG_NUM | PAIR_FIRST
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | CFMT_REG_NUM | PAIR_FIRST
 );
 ins!(
     INS_CONST_WIDE_16,
     22,
-    ACTION_SETS_REGISTER | CFMT_REG_NUM | PAIR_FIRST
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | CFMT_REG_NUM | PAIR_FIRST
 );
 ins!(
     INS_CONST_WIDE_32,
     23,
-    ACTION_SETS_REGISTER | CFMT_REG_NUM | PAIR_FIRST
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | CFMT_REG_NUM | PAIR_FIRST
 );
-ins!(INS_CONST_HIGH16, 24, ACTION_SETS_REGISTER | CFMT_REG_NUM);
+ins!(
+    INS_CONST_HIGH16,
+    24,
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | CFMT_REG_NUM
+);
 ins!(
     INS_CONST_WIDE_HIGH16,
     25,
-    ACTION_SETS_REGISTER | CFMT_REG_NUM | PAIR_FIRST
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | CFMT_REG_NUM | PAIR_FIRST
 );
 ins!(
     INS_CONST_STRING,
     26,
-    ACTION_SETS_REGISTER | ACTION_CAN_THROW | CFMT_REG_STR
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | ACTION_CAN_THROW | CFMT_REG_STR
 );
 ins!(
     INS_CONST_STRING_JUMBO,
     27,
-    ACTION_SETS_REGISTER | ACTION_CAN_THROW | CFMT_REG_STR
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | ACTION_CAN_THROW | CFMT_REG_STR
 );
 ins!(
     INS_CONST_METHOD_TYPE,
     28,
-    ACTION_SETS_REGISTER | ACTION_CAN_THROW
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | ACTION_CAN_THROW
 );
 ins!(
     INS_CONST_METHOD_HANDLE,
     29,
-    ACTION_SETS_REGISTER | ACTION_CAN_THROW
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | ACTION_CAN_THROW
 );
 ins!(INS_IF_NEZ, 30, ACTION_FORKING_COND | CFMT_REG_LABEL);
 ins!(INS_IF_EQZ, 31, ACTION_FORKING_COND | CFMT_REG_LABEL);
@@ -645,16 +668,16 @@ ins!(
     125,
     ACTION_SETS_STATIC_FIELD | ACTION_CAN_THROW | CFMT_REG_FIELD
 );
-ins!(INS_CHECK_CAST, 126, ACTION_CAN_THROW | CFMT_REG_CLASS);
+ins!(INS_CHECK_CAST, 126, ACTION_CAN_THROW | CFMT_REG_TYPE);
 ins!(
     INS_NEW_INSTANCE,
     127,
-    ACTION_SETS_REGISTER | ACTION_CAN_THROW | CFMT_REG_CLASS
+    ACTION_SETS_REGISTER | ACTION_CAN_THROW | CFMT_REG_TYPE
 );
 ins!(
     INS_CONST_CLASS,
     128,
-    ACTION_SETS_REGISTER | ACTION_CAN_THROW | CFMT_REG_CLASS
+    ACTION_SETS_REGISTER | ACTION_USES_CONST | ACTION_CAN_THROW | CFMT_REG_TYPE
 );
 ins!(
     INS_ADD_INT_LIT8,
@@ -822,7 +845,7 @@ ins!(
 ins!(
     INS_INSTANCE_OF,
     160,
-    ACTION_SETS_REGISTER | ACTION_CAN_THROW | CFMT_REG_REG_CLASS
+    ACTION_SETS_REGISTER | ACTION_CAN_THROW | CFMT_REG_REG_TYPE
 );
 ins!(
     INS_NEW_ARRAY,
@@ -1874,14 +1897,22 @@ impl Instruction {
         self.0.contains(InsBits::ACTION_MOVE_RESULT)
     }
 
+    /// The instruction writes the result register[s]
     #[inline]
     pub fn writes_result(self) -> bool {
         self.0.contains(InsBits::ACTION_SETS_RESULT)
     }
 
+    /// The instruction reads the result register[s]
     #[inline]
     pub fn reads_result(self) -> bool {
         self.0.contains(InsBits::ACTION_MOVE_RESULT)
+    }
+
+    /// The instruction uses a constant value
+    #[inline]
+    pub fn uses_const(self) -> bool {
+        self.0.contains(InsBits::ACTION_USES_CONST)
     }
 
     /// Checks whether the first register names a 64 bit pair, meaning the
@@ -1978,16 +2009,19 @@ impl Instruction {
         self.sets_static_field() || self.sets_instance_field()
     }
 
+    /// The instruction jumps unconditionally
     #[inline]
     pub fn is_jump(self) -> bool {
         self.0.contains(InsBits::ACTION_UNCOND_JUMP)
     }
 
+    /// The instruction is a switch instruction
     #[inline]
     pub fn is_switch(self) -> bool {
         self.0.contains(InsBits::ACTION_SWITCH)
     }
 
+    /// The instruction is some conditional, forking or switch
     #[inline]
     pub fn is_cond(self) -> bool {
         self.is_forking_cond() || self.is_switch()

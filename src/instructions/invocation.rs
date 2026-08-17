@@ -1,6 +1,6 @@
 use crate::instructions::Instruction;
 use crate::{
-    FieldRef, MethodRef, RawLabel, Register, RegisterCollection, Type, VarRegister,
+    FieldRef, MethodRef, RawLabel, RawLiteral, Register, RegisterCollection, Type, VarRegister,
     MAX_FIXED_REGISTERS,
 };
 
@@ -149,17 +149,14 @@ impl InvRegisters {
     fn from_args(args: &InvArgs<'_>) -> Self {
         let (regs, len) = match args {
             InvArgs::OneReg(a)
-            | InvArgs::RegStr(a, _)
             | InvArgs::OneRegLabel(a, _)
-            | InvArgs::OneRegNum(a, _)
-            | InvArgs::OneRegField(a, _)
-            | InvArgs::OneRegClass(a, _) => ([*a, Default::default(), Default::default()], 1),
+            | InvArgs::OneRegLiteral(a, _)
+            | InvArgs::OneRegField(a, _) => ([*a, Default::default(), Default::default()], 1),
 
             InvArgs::TwoReg(a, b)
             | InvArgs::TwoRegLabel(a, b, _)
-            | InvArgs::TwoRegNum(a, b, _)
+            | InvArgs::TwoRegLiteral(a, b, _)
             | InvArgs::TwoRegField(a, b, _)
-            | InvArgs::TwoRegClass(a, b, _)
             | InvArgs::TwoRegArray(a, b, _) => ([*a, *b, Default::default()], 2),
 
             InvArgs::ThreeReg(a, b, c) => ([*a, *b, *c], 3),
@@ -194,24 +191,22 @@ pub enum InvArgs<'a> {
     TwoReg(Register, Register),
     ThreeReg(Register, Register, Register),
 
-    RegStr(Register, &'a str),
-
     VarRegMethod(VarRegister, MethodRef<'a>),
 
     Label(RawLabel<'a>),
     OneRegLabel(Register, RawLabel<'a>),
     TwoRegLabel(Register, Register, RawLabel<'a>),
 
-    // RegNum uses the string representation of the literal so users only parse
-    // numerics that they care about.
-    OneRegNum(Register, &'a str),
-    TwoRegNum(Register, Register, &'a str),
+    OneRegLiteral(Register, RawLiteral<'a>),
+    TwoRegLiteral(Register, Register, RawLiteral<'a>),
 
+    //RegStr(Register, &'a str),
+    //OneRegNum(Register, &'a str),
+    //TwoRegNum(Register, Register, &'a str),
+    //OneRegClass(Register, Type<'a>),
+    //TwoRegClass(Register, Register, Type<'a>),
     OneRegField(Register, FieldRef<'a>),
     TwoRegField(Register, Register, FieldRef<'a>),
-
-    OneRegClass(Register, Type<'a>),
-    TwoRegClass(Register, Register, Type<'a>),
 
     VarRegArray(VarRegister, Type<'a>),
     TwoRegArray(Register, Register, Type<'a>),
@@ -223,7 +218,7 @@ pub enum InvArgs<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::instructions::*;
+    use crate::{instructions::*, SmaliClassName};
     use crate::{Primitive, RegisterArray, RegisterRange};
 
     macro_rules! reg {
@@ -320,7 +315,7 @@ mod test {
             &[reg!(v 0), reg!(v 1), reg!(v 2), reg!(v 3)],
         );
         let field = FieldRef {
-            class: "LFoo;",
+            class: SmaliClassName::new("LFoo;"),
             name: "f",
             ty: Type::new_prim(Primitive::Long),
         };
@@ -395,7 +390,10 @@ mod test {
         );
         check(
             INS_CHECK_CAST,
-            InvArgs::OneRegClass(reg!(v 0), Type::new_class("LFoo;")),
+            InvArgs::OneRegLiteral(
+                reg!(v 0),
+                RawLiteral::Type(Type::new_class(SmaliClassName::new("LFoo;"))),
+            ),
             &[],
             &[reg!(v 0)],
         );

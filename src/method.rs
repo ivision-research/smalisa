@@ -5,8 +5,8 @@ use std::ops::{Deref, DerefMut};
 use crate::instructions::Invocation;
 use crate::utils::ptr_eq;
 use crate::{
-    AccessFlag, Annotation, ArrayData, Catch, Label, Line, ParamAnnotations, Primitive, SwitchData,
-    Type,
+    AccessFlag, Annotation, ArrayData, Catch, Label, Line, ParamAnnotations, Primitive,
+    SmaliClassName, SwitchData, Type,
 };
 pub fn parse_method_args_into<'a>(args: &'a str, into: &mut Vec<Type<'a>>) -> Result<(), &'a str> {
     if args.is_empty() {
@@ -28,7 +28,10 @@ pub fn parse_method_args_into<'a>(args: &'a str, into: &mut Vec<Type<'a>>) -> Re
                     if let Some(b) = bytes.next() {
                         end += 1;
                         if b == b';' {
-                            into.push(Type::new_class_array(&args[start..end + 1], dim));
+                            into.push(Type::new_class_array(
+                                SmaliClassName::new(&args[start..end + 1]),
+                                dim,
+                            ));
                             start = end;
                             break;
                         }
@@ -325,6 +328,7 @@ simple_deref!(Method<'a>, header, MethodHeader<'a>, 'a);
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::SmaliClassName;
 
     macro_rules! tpma {
         ($args:literal, $($ty:expr),*) => {
@@ -343,7 +347,7 @@ mod test {
     fn test_parse_method_args() {
         tpma!(
             "Labc;JCIBSZVFDLadf;Lc;",
-            Type::Class("Labc;", 0),
+            Type::Class(SmaliClassName::new("Labc;"), 0),
             Type::Primitive(Primitive::Long, 0),
             Type::Primitive(Primitive::Char, 0),
             Type::Primitive(Primitive::Int, 0),
@@ -353,14 +357,14 @@ mod test {
             Type::Primitive(Primitive::Void, 0),
             Type::Primitive(Primitive::Float, 0),
             Type::Primitive(Primitive::Double, 0),
-            Type::Class("Ladf;", 0),
-            Type::Class("Lc;", 0)
+            Type::Class(SmaliClassName::new("Ladf;"), 0),
+            Type::Class(SmaliClassName::new("Lc;"), 0)
         );
 
         tpma!(
             "[[Z[[Lc;[D[[[F",
             Type::Primitive(Primitive::Bool, 2),
-            Type::Class("Lc;", 2),
+            Type::Class(SmaliClassName::new("Lc;"), 2),
             Type::Primitive(Primitive::Double, 1),
             Type::Primitive(Primitive::Float, 3)
         );

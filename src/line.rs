@@ -1,3 +1,4 @@
+use crate::class::SmaliClassName;
 use crate::instructions::Invocation;
 use crate::{
     AccessFlag, Annotation, Field, MethodHeader, RawArrayData, RawCatchAll, RawLabel,
@@ -10,11 +11,11 @@ use crate::{
 pub enum Line<'a> {
     Empty,
     /// The .class directive line
-    Class(AccessFlag, &'a str),
+    Class(AccessFlag, &'a SmaliClassName),
     /// The .super directive line
-    Super(&'a str),
+    Super(&'a SmaliClassName),
     /// An .implements directive line
-    Interface(&'a str),
+    Interface(&'a SmaliClassName),
     /// Any instruction call
     InstructionInvocation(Invocation<'a>),
     /// A :label line

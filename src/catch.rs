@@ -1,4 +1,4 @@
-use crate::{Label, RawLabel};
+use crate::{Label, RawLabel, SmaliClassName};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -13,7 +13,8 @@ pub enum Catch<'a> {
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct NamedCatch<'a> {
-    pub class: &'a str,
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    pub class: &'a SmaliClassName,
     pub start_label: Label,
     pub end_label: Label,
     pub dest_label: Label,
@@ -23,7 +24,8 @@ pub struct NamedCatch<'a> {
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct RawNamedCatch<'a> {
-    pub class: &'a str,
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    pub class: &'a SmaliClassName,
     #[cfg_attr(feature = "serde", serde(borrow))]
     pub start_label: RawLabel<'a>,
     #[cfg_attr(feature = "serde", serde(borrow))]
@@ -34,7 +36,7 @@ pub struct RawNamedCatch<'a> {
 
 impl<'a> RawNamedCatch<'a> {
     pub fn new(
-        class: &'a str,
+        class: &'a SmaliClassName,
         start_label: RawLabel<'a>,
         end_label: RawLabel<'a>,
         dest_label: RawLabel<'a>,

@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::class::ClassLineBuilder;
+use crate::class::{ClassLineBuilder, SmaliClassName};
 use crate::instructions::{InsBits, Instruction, InvArgs, Invocation};
 use crate::method::MethodLineBuilder;
 use crate::*;
@@ -62,7 +62,7 @@ pub enum ParseError<'a> {
     #[error("bad label: {0}")]
     BadLabel(&'a str),
     #[error("unsupported instruction: {0}")]
-    UnsupportedInstruction(&'a str),
+    UnsupportedInstruction(String),
 }
 
 impl<'a> ParseError<'a> {
@@ -232,7 +232,7 @@ where
                         }
                         Token::ClassDescriptor(clazz) => {
                             acc.ensure_access();
-                            return Ok(Line::Class(acc, clazz));
+                            return Ok(Line::Class(acc, SmaliClassName::new(clazz)));
                         }
                         _ => unexpected_tok!(self),
                     }
@@ -359,11 +359,19 @@ where
     }
 
     parse_tok_return!(expect_simple_name, &'lex str, SimpleName);
-    parse_tok_return!(parse_class_name, &'lex str, ClassDescriptor);
     parse_tok_return!(parse_lit_str, &'lex str, StringLiteral);
     parse_tok_return!(parse_register, Register, Register);
     parse_tok_return!(parse_numeric, &'lex str, NumericLiteral);
     parse_tok_return!(expect_method_args, &'lex str, MethodArgs);
+
+    fn parse_class_name(&mut self) -> ParseResult<'lex, &'lex SmaliClassName> {
+        self.lex_next()?;
+        if let Token::ClassDescriptor(val) = self.token {
+            Ok(SmaliClassName::new(val))
+        } else {
+            unexpected_tok!(self);
+        }
+    }
 
     fn parse_field_ref(&mut self, into: &mut FieldRef<'lex>) -> ParseResult<'lex> {
         into.class = self.parse_class_name()?;
@@ -386,7 +394,7 @@ where
                     return Ok(Type::new_prim_array(prim, dim));
                 }
                 Token::ClassDescriptor(clazz) => {
-                    return Ok(Type::new_class_array(clazz, dim));
+                    return Ok(Type::new_class_array(SmaliClassName::new(clazz), dim));
                 }
                 _ => unexpected_tok!(self),
             }
@@ -561,7 +569,9 @@ where
                     return Ok(AnnotationValue::List(v));
                 }
                 Token::ClassDescriptor(cd) => {
-                    v.push(AnnotationValue::Type(Type::new_class(cd)));
+                    v.push(AnnotationValue::Type(Type::new_class(SmaliClassName::new(
+                        cd,
+                    ))));
                 }
 
                 Token::Comma => continue,
@@ -611,7 +621,9 @@ where
                             v.push(AnnotationValue::Subannotation(subann));
                         }
                         Token::ClassDescriptor(cd) => {
-                            v.push(AnnotationValue::Type(Type::new_class(cd)));
+                            v.push(AnnotationValue::Type(Type::new_class(SmaliClassName::new(
+                                cd,
+                            ))));
                         }
                         _ => {
                             if let Some(raw) = RawLiteral::from_token(&self.token) {
@@ -630,7 +642,13 @@ where
                     match self.token {
                         Token::ArrayTypePrefix => dim += 1,
                         Token::ClassDescriptor(cd) => {
-                            into.insert(key, AnnotationValue::Type(Type::new_class_array(cd, dim)));
+                            into.insert(
+                                key,
+                                AnnotationValue::Type(Type::new_class_array(
+                                    SmaliClassName::new(cd),
+                                    dim,
+                                )),
+                            );
                             break;
                         }
                         Token::PrimitiveType(p) => {
@@ -666,7 +684,10 @@ where
                         AnnotationValue::Method(MethodRef::new(cd, name, args, ret_type)),
                     );
                 } else {
-                    into.insert(key, AnnotationValue::Type(Type::new_class(cd)));
+                    into.insert(
+                        key,
+                        AnnotationValue::Type(Type::new_class(SmaliClassName::new(cd))),
+                    );
                 }
             }
             Token::PrimitiveType(p) => {
@@ -839,11 +860,6 @@ where
                 let ty = self.parse_type()?;
                 InvArgs::Polymorphic(regs, mref, margs, ty)
             }
-            InsBits::CFMT_ARGS_METHOD_CUSTOM => {
-                return Err(ParseError::UnsupportedInstruction(
-                    "invoke-custom;invoke-custom/range",
-                ));
-            }
             InsBits::CFMT_ARGS_METHOD => {
                 let regs = self.parse_variable_registers()?;
                 expect!(self, Comma);
@@ -872,7 +888,7 @@ where
             InsBits::CFMT_REG_STR => {
                 let reg = self.parse_register()?;
                 expect!(self, Comma);
-                InvArgs::RegStr(reg, self.parse_lit_str()?)
+                InvArgs::OneRegLiteral(reg, RawLiteral::String(self.parse_lit_str()?))
             }
             InsBits::CFMT_REG_FIELD => {
                 let reg = self.parse_register()?;
@@ -890,34 +906,40 @@ where
                 self.parse_field_ref(&mut fref)?;
                 InvArgs::TwoRegField(reg, reg2, fref)
             }
-            InsBits::CFMT_REG_CLASS => {
+            InsBits::CFMT_REG_TYPE => {
                 let reg = self.parse_register()?;
                 expect!(self, Comma);
                 let ty = self.parse_type()?;
-                InvArgs::OneRegClass(reg, ty)
+                InvArgs::OneRegLiteral(reg, RawLiteral::Type(ty))
             }
-            InsBits::CFMT_REG_REG_CLASS => {
+            InsBits::CFMT_REG_REG_TYPE => {
                 let reg = self.parse_register()?;
                 expect!(self, Comma);
                 let reg2 = self.parse_register()?;
                 expect!(self, Comma);
                 let ty = self.parse_type()?;
-                InvArgs::TwoRegClass(reg, reg2, ty)
+                InvArgs::TwoRegLiteral(reg, reg2, RawLiteral::Type(ty))
             }
             InsBits::CFMT_REG_NUM => {
                 let reg = self.parse_register()?;
                 expect!(self, Comma);
                 let num = self.parse_numeric()?;
-                InvArgs::OneRegNum(reg, num)
+                InvArgs::OneRegLiteral(reg, RawLiteral::Numeric(num))
             }
             InsBits::CFMT_REG_REG_NUM => {
                 let reg = self.parse_register()?;
                 expect!(self, Comma);
                 let regb = self.parse_register()?;
                 expect!(self, Comma);
-                InvArgs::TwoRegNum(reg, regb, self.parse_numeric()?)
+                let num = self.parse_numeric()?;
+                InvArgs::TwoRegLiteral(reg, regb, RawLiteral::Numeric(num))
             }
-            _ => todo!(),
+            _ => {
+                // Currently we don't support invoke-custom, invoke-custom/range,
+                // invoke-method-type, and invoke-method-handle. In the future more instructions
+                // might show up so just default to an error saying we don't support it.
+                return Err(ParseError::UnsupportedInstruction(ins.to_string()));
+            }
         };
         Ok(Line::InstructionInvocation(Invocation::new(ins, args)))
     }
@@ -996,6 +1018,7 @@ mod test {
     #[cfg(feature = "annotations")]
     use crate::AnnotationVisibility;
     use crate::Primitive;
+    use crate::SmaliClassName;
 
     macro_rules! reg {
         ($r:ident) => {
@@ -1057,9 +1080,9 @@ mod test {
         assert_ins!(
             "const-string v0, \"string\"",
             INS_CONST_STRING,
-            RegStr,
+            OneRegLiteral,
             reg!(v0),
-            "string"
+            RawLiteral::String("string")
         );
     }
 
@@ -1071,9 +1094,9 @@ mod test {
             OneRegField,
             reg!(v0),
             FieldRef {
-                class: "La/t/f/D;",
+                class: SmaliClassName::new("La/t/f/D;"),
                 name: "sVal",
-                ty: Type::new_class("Ljava/lang/Object;"),
+                ty: Type::new_class(SmaliClassName::new("Ljava/lang/Object;")),
             }
         );
 
@@ -1083,9 +1106,9 @@ mod test {
             OneRegField,
             reg!(v3),
             FieldRef {
-                class: "Laaa/bbb/Ccc;",
+                class: SmaliClassName::new("Laaa/bbb/Ccc;"),
                 name: "ARR_FIELD",
-                ty: Type::new_class_array("Ljava/lang/Object;", 2),
+                ty: Type::new_class_array(SmaliClassName::new("Ljava/lang/Object;"), 2),
             }
         );
     }
@@ -1135,7 +1158,13 @@ mod test {
 
     #[test]
     fn parse_fmt_reg_num() {
-        assert_ins!("const p12, 0xef\n", INS_CONST, OneRegNum, reg!(p12), "0xef");
+        assert_ins!(
+            "const p12, 0xef\n",
+            INS_CONST,
+            OneRegLiteral,
+            reg!(p12),
+            RawLiteral::Numeric("0xef")
+        );
     }
 
     #[test]
@@ -1160,7 +1189,7 @@ mod test {
             INS_FILLED_NEW_ARRAY_RANGE,
             VarRegArray,
             VarRegister::Range(reg_range!(v0..v5)),
-            Type::new_class_array("Ljava/lang/String;", 1)
+            Type::new_class_array(SmaliClassName::new("Ljava/lang/String;"), 1)
         );
 
         assert_ins!(
@@ -1168,7 +1197,7 @@ mod test {
             INS_FILLED_NEW_ARRAY,
             VarRegArray,
             VarRegister::Array(reg_array!(v0, p2, v5)),
-            Type::new_class_array("Ljava/lang/String;", 1)
+            Type::new_class_array(SmaliClassName::new("Ljava/lang/String;"), 1)
         );
     }
 
@@ -1207,7 +1236,7 @@ mod test {
                 "La/b/c;",
                 "Method",
                 "IZLa/b/d;J",
-                Type::new_class("Ljava/lang/String;"),
+                Type::new_class(SmaliClassName::new("Ljava/lang/String;")),
             )
         );
     }
@@ -1217,10 +1246,10 @@ mod test {
         assert_ins!(
             "add-int/lit8 v15, p12, 12\n",
             INS_ADD_INT_LIT8,
-            TwoRegNum,
+            TwoRegLiteral,
             reg!(v15),
             reg!(p12),
-            "12"
+            RawLiteral::Numeric("12")
         );
     }
 
@@ -1246,20 +1275,26 @@ mod test {
 
     #[test]
     fn parse_super() {
-        assert_line!(".super Lfoo/bar/B;\n", Line::Super("Lfoo/bar/B;"));
+        assert_line!(
+            ".super Lfoo/bar/B;\n",
+            Line::Super(SmaliClassName::new("Lfoo/bar/B;"))
+        );
     }
 
     #[test]
     fn parse_class() {
         assert_line!(
             ".class Lfoo/bar/B;\n",
-            Line::Class(AccessFlag::PUBLIC, "Lfoo/bar/B;")
+            Line::Class(AccessFlag::PUBLIC, SmaliClassName::new("Lfoo/bar/B;"))
         );
     }
 
     #[test]
     fn parse_implements() {
-        assert_line!(".implements Lfoo/bar/B;\n", Line::Interface("Lfoo/bar/B;"));
+        assert_line!(
+            ".implements Lfoo/bar/B;\n",
+            Line::Interface(SmaliClassName::new("Lfoo/bar/B;"))
+        );
     }
 
     #[cfg(feature = "annotations")]
@@ -1333,7 +1368,7 @@ mod test {
 "#,
         access: PRIVATE | FINAL | BLACKLIST,
         name: "mCache",
-        ty: Type::new_class("Ljava/util/concurrent/ConcurrentHashMap;"),
+        ty: Type::new_class(SmaliClassName::new("Ljava/util/concurrent/ConcurrentHashMap;")),
         raw_value: RawLiteral::Unset,
         annotations: []
         );
@@ -1352,7 +1387,7 @@ mod test {
 "#,
         access: PRIVATE | BLACKLIST,
         name: "hashMapOfRepairDBInfo",
-        ty: Type::new_class("Ljava/util/HashMap;"),
+        ty: Type::new_class(SmaliClassName::new("Ljava/util/HashMap;")),
         raw_value: RawLiteral::Unset,
         annotations: []
         );
@@ -1364,7 +1399,7 @@ mod test {
             ".field public static final greylist NAME:Ljava/lang/String; = \"g\"",
             access: PUBLIC | GREYLIST | STATIC | FINAL,
             name: "NAME",
-            ty: Type::new_class("Ljava/lang/String;"),
+            ty: Type::new_class(SmaliClassName::new("Ljava/lang/String;")),
             raw_value: RawLiteral::String("g"),
             annotations: []
         );
@@ -1374,7 +1409,7 @@ mod test {
         .field public static final greylist NAME:Ljava/lang/String; = "Path""#,
             access: PUBLIC | GREYLIST | STATIC | FINAL,
             name: "NAME",
-            ty: Type::new_class("Ljava/lang/String;"),
+            ty: Type::new_class(SmaliClassName::new("Ljava/lang/String;")),
             raw_value: RawLiteral::String("Path"),
             annotations: []
         );
@@ -1383,7 +1418,7 @@ mod test {
             ".field private static final NAME:[Ljava/lang/String;",
             access: PRIVATE | STATIC | FINAL,
             name: "NAME",
-            ty: Type::new_class_array("Ljava/lang/String;", 1),
+            ty: Type::new_class_array(SmaliClassName::new("Ljava/lang/String;"), 1),
             raw_value: RawLiteral::Unset,
             annotations: []
         );
@@ -1392,7 +1427,7 @@ mod test {
             ".field NAME:Ljava/lang/String; = null\n",
             access: PUBLIC,
             name: "NAME",
-            ty: Type::new_class("Ljava/lang/String;"),
+            ty: Type::new_class(SmaliClassName::new("Ljava/lang/String;")),
             raw_value: RawLiteral::Null,
             annotations: [
             ]
@@ -1411,7 +1446,7 @@ mod test {
             ".field clazz:La/b/c/d/e/F;\n",
             access: PUBLIC,
             name: "clazz",
-            ty: Type::new_class("La/b/c/d/e/F;"),
+            ty: Type::new_class(SmaliClassName::new("La/b/c/d/e/F;")),
             raw_value: RawLiteral::Unset,
             annotations: []
         );
@@ -1424,7 +1459,7 @@ mod test {
 .end field"#,
             access: STATIC | PROTECTED,
             name: "clazz",
-            ty: Type::new_class("La/b/c;"),
+            ty: Type::new_class(SmaliClassName::new("La/b/c;")),
             raw_value: RawLiteral::Unset,
             annotations: [
                 annotation!(
@@ -1446,7 +1481,7 @@ mod test {
         .end field"#,
             access: STATIC | PROTECTED,
             name: "clazz",
-            ty: Type::new_class("La/b/c;"),
+            ty: Type::new_class(SmaliClassName::new("La/b/c;")),
             raw_value: RawLiteral::Unset,
             annotations: [
                 annotation!(
@@ -1474,7 +1509,7 @@ mod test {
         .end field"#,
             access: STATIC | PROTECTED,
             name: "clazz",
-            ty: Type::new_class("La/b/c;"),
+            ty: Type::new_class(SmaliClassName::new("La/b/c;")),
             raw_value: RawLiteral::Unset,
             annotations: [
                 annotation!(
@@ -1510,7 +1545,7 @@ mod test {
         .end field"#,
             access: STATIC | PROTECTED,
             name: "clazz",
-            ty: Type::new_class("La/b/c;"),
+            ty: Type::new_class(SmaliClassName::new("La/b/c;")),
             raw_value: RawLiteral::Unset,
             annotations: [
                 annotation!(
@@ -1546,7 +1581,7 @@ mod test {
         .end field"#,
         access: STATIC | PROTECTED,
         name: "clazz",
-        ty: Type::new_class("La/b/c;"),
+        ty: Type::new_class(SmaliClassName::new("La/b/c;")),
         raw_value: RawLiteral::Unset,
         annotations: [
             annotation!(
@@ -1570,7 +1605,7 @@ mod test {
         assert_line!(
             ".catch Ljava/lang/Exception; {:try_start_0 .. :try_end_9} :catch_b\n",
             Line::NamedCatch(RawNamedCatch::new(
-                "Ljava/lang/Exception;",
+                SmaliClassName::new("Ljava/lang/Exception;"),
                 RawLabel::new("try_start_0"),
                 RawLabel::new("try_end_9"),
                 RawLabel::new("catch_b")
@@ -1654,7 +1689,7 @@ mod test {
             access: PRIVATE,
             name: "has spaces",
             inputs: "IJZLjava/lang/Object;DF",
-            ret: Type::new_class("Ljava/lang/String;")
+            ret: Type::new_class(SmaliClassName::new("Ljava/lang/String;"))
         );
     }
 
@@ -1680,11 +1715,17 @@ mod test {
         let mut parser = Parser::new(lexer);
         assert_next_line!(
             parser,
-            Line::Class(AccessFlag::PRIVATE | AccessFlag::ABSTRACT, "La/b/C;")
+            Line::Class(
+                AccessFlag::PRIVATE | AccessFlag::ABSTRACT,
+                SmaliClassName::new("La/b/C;")
+            )
         );
-        assert_next_line!(parser, Line::Super("Ljava/lang/Object;"));
-        assert_next_line!(parser, Line::Interface("Lq/r/T;"));
-        assert_next_line!(parser, Line::Interface("Lf/o/O;"));
+        assert_next_line!(
+            parser,
+            Line::Super(SmaliClassName::new("Ljava/lang/Object;"))
+        );
+        assert_next_line!(parser, Line::Interface(SmaliClassName::new("Lq/r/T;")));
+        assert_next_line!(parser, Line::Interface(SmaliClassName::new("Lf/o/O;")));
     }
 
     #[test]
@@ -1798,7 +1839,7 @@ mod test {
             class: "Ldalvik/annotation/MemberClasses;",
             vis: System,
             params: {
-                "value" = AnnotationValue::List(vec![AnnotationValue::Type(Type::new_class("Landroid/app/slice/SliceItem$SliceType;"))])
+                "value" = AnnotationValue::List(vec![AnnotationValue::Type(Type::new_class(SmaliClassName::new("Landroid/app/slice/SliceItem$SliceType;")))])
             }
             ))
         );
@@ -1909,7 +1950,7 @@ mod test {
                                 class: "Lcom/android/systemui/plugins/annotations/DependsOn;",
                                 vis: Unset,
                                 params: {
-                                    "target" = Type::new_class("Lcom/android/systemui/plugins/GlobalActionsPanelPlugin$Callbacks;")
+                                    "target" = Type::new_class(SmaliClassName::new("Lcom/android/systemui/plugins/GlobalActionsPanelPlugin$Callbacks;"))
                                 }
                             )
                         ),
@@ -1918,7 +1959,7 @@ mod test {
                                 class: "Lcom/android/systemui/plugins/annotations/DependsOn;",
                                 vis: Unset,
                                 params: {
-                                    "target" = Type::new_class("Lcom/android/systemui/plugins/GlobalActionsPanelPlugin$PanelViewController;")
+                                    "target" = Type::new_class(SmaliClassName::new("Lcom/android/systemui/plugins/GlobalActionsPanelPlugin$PanelViewController;"))
                                 }
                             )
                         )
@@ -1964,8 +2005,8 @@ mod test {
             vis: System,
             params: {
                 "value" = AnnotationValue::List(vec![
-                        AnnotationValue::Type(Type::new_class("Lcom/android/systemui/plugins/GlobalActionsPanelPlugin$PanelViewController;")),
-                        AnnotationValue::Type(Type::new_class("Lcom/android/systemui/plugins/GlobalActionsPanelPlugin$Callbacks;"))
+                        AnnotationValue::Type(Type::new_class(SmaliClassName::new("Lcom/android/systemui/plugins/GlobalActionsPanelPlugin$PanelViewController;"))),
+                        AnnotationValue::Type(Type::new_class(SmaliClassName::new("Lcom/android/systemui/plugins/GlobalActionsPanelPlugin$Callbacks;")))
                     ])
             }
             ))
@@ -2001,7 +2042,7 @@ mod test {
                     vis: Runtime,
                     params: {
                         "declClass" = AnnotationValue::Type(
-                            Type::new_class_array("La/b/c;", 2)
+                            Type::new_class_array(SmaliClassName::new("La/b/c;"), 2)
                         )
                     }
             ))

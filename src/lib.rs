@@ -31,7 +31,10 @@ mod arena;
 pub use arena::Arena;
 
 mod class;
-pub use class::{Class, ClassLineBuilder, PackageClass};
+pub use class::{
+    Class, ClassLineBuilder, ClassName, JavaClassName, OwnedJavaClassName, OwnedSmaliClassName,
+    SmaliClassName,
+};
 
 mod method;
 pub use method::{
@@ -72,3 +75,12 @@ pub use switch::{RawPackedSwitchData, RawSparseSwitchData, RawSwitchPair, Switch
 
 mod array;
 pub use array::{ArrayData, RawArrayData};
+
+#[cfg(feature = "cfg")]
+pub(crate) mod index;
+
+#[cfg(feature = "cfg")]
+pub mod cfg;
+
+#[cfg(feature = "ssa")]
+pub mod ssa;

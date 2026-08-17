@@ -1,12 +1,13 @@
 use std::hash::Hash;
 
-use crate::{AccessFlag, Annotation, Literal, RawLiteral, Type};
+use crate::{AccessFlag, Annotation, Literal, RawLiteral, SmaliClassName, Type};
 
 #[derive(Debug, Default, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct FieldRef<'a> {
-    pub class: &'a str,
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    pub class: &'a SmaliClassName,
     pub name: &'a str,
     pub ty: Type<'a>,
 }

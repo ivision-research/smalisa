@@ -1,14 +1,18 @@
 use std::fmt;
 use std::{borrow::Cow, hash::Hash};
 
-use crate::{PackageClass, Primitive};
+use crate::class::{ClassName, SmaliClassName};
+use crate::Primitive;
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub enum Type<'a> {
     Unknown,
-    Class(&'a str, u8),
+    Class(
+        #[cfg_attr(feature = "serde", serde(borrow))] &'a SmaliClassName,
+        u8,
+    ),
     Primitive(Primitive, u8),
 }
 
@@ -63,7 +67,7 @@ impl<'a> Type<'a> {
             }
             Type::Class(cd, size) => {
                 if size == 0 {
-                    Some(Cow::Borrowed(cd))
+                    Some(Cow::Borrowed(cd.as_str()))
                 } else {
                     Some(Cow::Owned(format!("{}{}", "[".repeat(size as usize), cd)))
                 }
@@ -87,29 +91,25 @@ impl<'a> Type<'a> {
                 }
             }
             Type::Class(cd, size) => {
-                let pclass = PackageClass::from_lclass(cd)?;
+                let (pkg, class) = cd.split_java_package();
                 if size == 0 {
                     if fully_qualified {
-                        Some(Cow::Owned(format!(
-                            "{}.{}",
-                            pclass.dot_package(),
-                            pclass.name
-                        )))
+                        Some(Cow::Owned(format!("{}.{}", pkg, class)))
                     } else {
-                        Some(Cow::Borrowed(pclass.name))
+                        Some(Cow::Borrowed(class))
                     }
                 } else {
                     if fully_qualified {
                         Some(Cow::Owned(format!(
                             "{}.{}{}",
-                            pclass.dot_package(),
-                            pclass.name,
+                            pkg,
+                            class,
                             "[]".repeat(size as usize)
                         )))
                     } else {
                         Some(Cow::Owned(format!(
                             "{}{}",
-                            pclass.name,
+                            class,
                             "[]".repeat(size as usize)
                         )))
                     }
@@ -132,12 +132,12 @@ impl<'a> Type<'a> {
     }
 
     #[inline]
-    pub fn new_class(clazz: &'a str) -> Self {
+    pub fn new_class(clazz: &'a SmaliClassName) -> Self {
         Self::Class(clazz, 0)
     }
 
     #[inline]
-    pub fn new_class_array(clazz: &'a str, dim: u8) -> Self {
+    pub fn new_class_array(clazz: &'a SmaliClassName, dim: u8) -> Self {
         Self::Class(clazz, dim)
     }
 }
@@ -159,6 +159,7 @@ impl<'a> From<Primitive> for Type<'a> {
 mod test {
 
     use super::*;
+    use crate::SmaliClassName;
 
     macro_rules! test_java_str {
         ($ty:expr, $qual:literal) => {
@@ -217,12 +218,12 @@ mod test {
         test_java_str!(owned Type::Primitive(Primitive::Byte, 3), "byte[][][]", false);
         test_java_str!(owned Type::Primitive(Primitive::Short, 1), "short[]", false);
 
-        test_java_str!(borrowed Type::Class("Lfoo/bar/Baz;", 0), "Baz", false);
-        test_java_str!(owned Type::Class("Lfoo/bar/Baz;", 1), "Baz[]", false);
-        test_java_str!(owned Type::Class("Lfoo/bar/Baz;", 2), "Baz[][]", false);
-        test_java_str!(owned Type::Class("Lfoo/bar/Baz;", 0), "foo.bar.Baz", true);
-        test_java_str!(owned Type::Class("Lfoo/bar/Baz;", 1), "foo.bar.Baz[]", true);
-        test_java_str!(owned Type::Class("Lfoo/bar/Baz;", 2), "foo.bar.Baz[][]", true);
+        test_java_str!(borrowed Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 0), "Baz", false);
+        test_java_str!(owned Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 1), "Baz[]", false);
+        test_java_str!(owned Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 2), "Baz[][]", false);
+        test_java_str!(owned Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 0), "foo.bar.Baz", true);
+        test_java_str!(owned Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 1), "foo.bar.Baz[]", true);
+        test_java_str!(owned Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 2), "foo.bar.Baz[][]", true);
     }
     #[test]
     fn as_smali_str() {
@@ -247,8 +248,8 @@ mod test {
         test_smali_str!(owned Type::Primitive(Primitive::Byte, 3), "[[[B");
         test_smali_str!(owned Type::Primitive(Primitive::Short, 1), "[S");
 
-        test_smali_str!(borrowed Type::Class("Lfoo/bar/Baz;", 0), "Lfoo/bar/Baz;");
-        test_smali_str!(owned Type::Class("Lfoo/bar/Baz;", 1), "[Lfoo/bar/Baz;");
-        test_smali_str!(owned Type::Class("Lfoo/bar/Baz;", 2), "[[Lfoo/bar/Baz;");
+        test_smali_str!(borrowed Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 0), "Lfoo/bar/Baz;");
+        test_smali_str!(owned Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 1), "[Lfoo/bar/Baz;");
+        test_smali_str!(owned Type::Class(SmaliClassName::new("Lfoo/bar/Baz;"), 2), "[[Lfoo/bar/Baz;");
     }
 }
