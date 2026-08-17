@@ -16,7 +16,7 @@ yoke = { version = "0.8", optional = true, features = ["derive"] }
 smalisa = { path = ".", features = ["serde"] }
 
 [features]
-default = ["annotations", "serde"]
+default = ["annotations", "serde", "ssa"]
 # Don't skip over annotations
 annotations = []
 big-registers = []
