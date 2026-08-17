@@ -187,17 +187,24 @@ impl<'a> SsaMethod<'a> {
         &self.inst_defs[id.index()]
     }
 
+    /// Retrieve the [Value] for the provided [ValueId]
     pub fn value(&self, id: ValueId) -> &Value {
         &self.values[id.index()]
     }
 
+    /// Retrieve the [Phi] for the given [PhiId]
     pub fn phi(&self, id: PhiId) -> &Phi {
         &self.phis[id.index()]
     }
 
-    /// The literal behind a [Value::Const]
+    /// Retrieve the [Literal] for the given [ConstId]
     pub fn constant(&self, id: ConstId) -> &Literal<'a> {
         &self.consts[id.index()]
+    }
+
+    /// Retrieve an iterator over all [Literal]s
+    pub fn constants(&self) -> impl Iterator<Item = &Literal<'a>> {
+        self.consts.iter()
     }
 
     /// Every phi that survived trivial phi removal. Prefer this over iterating
