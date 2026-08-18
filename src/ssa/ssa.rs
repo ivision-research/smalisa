@@ -4,8 +4,8 @@ use std::ops::Deref;
 use std::collections::HashMap;
 
 use crate::{
-    instructions::{InvArgs, Invocation},
     AccessFlag, Field, Literal, MethodLine, Register, SmaliClassName,
+    instructions::{InvArgs, Invocation},
 };
 
 use crate::cfg::{
@@ -986,7 +986,7 @@ impl<'a> SsaBuilder<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{parse_class, Arena, Lexer, Parser};
+    use crate::{Arena, Lexer, Parser, parse_class};
 
     fn build<'a>(arena: &'a Arena, body: &str) -> BuildResult<SsaMethod<'a>> {
         let smali = format!(
@@ -1407,6 +1407,90 @@ mod test {
             added,
             "return v0 must read the increment, got {:?}",
             m.value(returned)
+        );
+    }
+
+    /// I think this is a more realistic test than
+    /// `a_header_that_writes_after_its_phi_keeps_the_write_as_its_definition`.
+    /// What this is testing is:
+    ///
+    /// ```java
+    /// int strlen(byte[] s) {
+    ///     int i = 0;
+    ///
+    ///     while (s[i++] != 0);
+    ///
+    ///     return i - 1;
+    /// }
+    /// ```
+    ///
+    /// The reason this works is the `i++` being in the `while` condition creates
+    /// both a read and a write to `i` within the header. If the result of
+    /// `add_phi_operands` is written to the variable, it will only know the `i`
+    /// as it exists during the read in the header, rather than `i` as it exists
+    /// after the increment.
+    ///
+    /// It has to be the post increment. The body increment form,
+    /// `while (s[i] != 0) { i += 1; }`, tests in the header and increments in
+    /// the body, so the header only ever reads it and the test cannot fail.
+    #[test]
+    fn a_post_increment_strlen_reads_the_bump_after_the_loop() {
+        let arena = Arena::new();
+        let m = built(
+            &arena,
+            r#".method public static strlen([B)I
+    .registers 4
+    const/4 v0, 0x0
+    :goto_0
+    aget-byte v1, p0, v0
+    add-int/lit8 v0, v0, 0x1
+    if-nez v1, :goto_0
+    add-int/lit8 v0, v0, -0x1
+    return v0
+.end method"#,
+        );
+
+        let v0 = reg(&m, "v0");
+        assert_eq!(live_phis(&m), vec![(1, v0.index())]);
+
+        let (_, phi) = m
+            .live_phis()
+            .find(|(_, phi)| phi.block.index() == 1 && phi.variable == v0)
+            .expect("the header phi for the index");
+        let bumped = m.defs(InstructionId::new(2))[0];
+
+        let operands = phi_operands(&m, 1, v0);
+        assert_eq!(
+            operands.iter().map(|(block, _)| *block).collect::<Vec<_>>(),
+            vec![0, 1],
+            "the index merges the entry and the latch"
+        );
+        assert_eq!(const_int(&m, operands[0].1), 0, "the entry const/4 v0, 0x0");
+        assert_eq!(operands[1].1, bumped, "the latch carries the bump back");
+
+        // Reads inside the header resolve while it is being filled, so the load
+        // is already correct before sealing runs at all
+        let indexed = m.uses(InstructionId::new(1))[1];
+        assert_eq!(
+            indexed,
+            phi.value,
+            "aget-byte must index with the phi, got {:?}",
+            m.value(indexed)
+        );
+
+        // The decrement resolves through the header's definition instead, so it
+        // is the one sealing can corrupt
+        let decremented = m.uses(InstructionId::new(4))[0];
+        assert_eq!(
+            decremented,
+            bumped,
+            "the decrement must read the bump, got {:?}",
+            m.value(decremented)
+        );
+        assert_eq!(
+            m.uses(InstructionId::new(5))[0],
+            m.defs(InstructionId::new(4))[0],
+            "the length returned is the decrement"
         );
     }
 
