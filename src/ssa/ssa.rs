@@ -925,8 +925,7 @@ impl<'a> SsaBuilder<'a> {
         for phi_id in incomplete_phis {
             let phi = self.get_phi(phi_id);
             let variable = phi.variable;
-            let value = self.add_phi_operands(cfg, variable, block_id, phi_id);
-            self.write_variable(variable, block_id, value);
+            self.add_phi_operands(cfg, variable, block_id, phi_id);
         }
     }
 
@@ -1360,6 +1359,54 @@ mod test {
                 .map(|(b, _)| *b)
                 .collect::<Vec<_>>(),
             vec![0, 7]
+        );
+    }
+
+    /// A loop header that reads a variable and then writes it. The read creates
+    /// the header phi; the write is the block's real final definition. Sealing
+    /// happens after the block is filled, so completing that phi must not put the
+    /// phi back into `current_def` over the write. Anything reading through the
+    /// header afterwards has to see the write.
+    #[test]
+    fn a_header_that_writes_after_its_phi_keeps_the_write_as_its_definition() {
+        let arena = Arena::new();
+        let m = built(
+            &arena,
+            r#".method public m(I)I
+    .registers 3
+    const/4 v0, 0x0
+    :goto_0
+    add-int/lit8 v0, v0, 0x1
+    if-lez p1, :goto_0
+    return v0
+.end method"#,
+        );
+
+        let v0 = reg(&m, "v0");
+
+        // The header does merge v0, so the phi itself is expected, and it merges
+        // the right two values
+        assert_eq!(live_phis(&m), vec![(1, v0.index())]);
+        let added = m.defs(InstructionId::new(1))[0];
+        let operands = phi_operands(&m, 1, v0);
+        assert_eq!(
+            operands.iter().map(|(block, _)| *block).collect::<Vec<_>>(),
+            vec![0, 1],
+            "the phi merges the entry and the latch"
+        );
+        assert_eq!(const_int(&m, operands[0].1), 0, "the entry const/4 v0, 0x0");
+        assert_eq!(
+            operands[1].1, added,
+            "the increment comes back round the loop"
+        );
+
+        // ...but it is the increment, not the phi, that leaves the header
+        let returned = m.uses(InstructionId::new(3))[0];
+        assert_eq!(
+            returned,
+            added,
+            "return v0 must read the increment, got {:?}",
+            m.value(returned)
         );
     }
 
