@@ -13,7 +13,7 @@ yoke = { version = "0.8", optional = true, features = ["derive"] }
 
 # Enable features when testing
 [dev-dependencies]
-smalisa = { path = ".", features = ["serde"] }
+smalisa = { path = ".", features = ["serde", "ssa", "annotations", "yoke", "cfg"] }
 
 [features]
 default = ["annotations", "serde", "ssa"]
