@@ -257,7 +257,8 @@ impl<'a> MethodLineBuilder<'a> {
     /// completely unaware of state: [Line::MethodEnd] and [Line::MethodHeader] are silently
     /// ignored. It is up to the driver to manage state correctly!
     pub fn push_line(&mut self, line: Line<'a>) {
-        // TODO remove the _unchecked maybe
+        // TODO: Oh boy we saw a panic finally after all these years, but now this needs to be
+        // fallible but I'm busy
         match line {
             Line::Annotation(ann) => {
                 self.annotations.push(ann);
@@ -266,26 +267,34 @@ impl<'a> MethodLineBuilder<'a> {
                 self.lines.push(MethodLine::Instruction(inv));
             }
             Line::LabelDefinition(lab) => {
-                let parsed = lab.to_label_unchecked();
-                self.lines.push(MethodLine::LabelDef(parsed));
+                if let Some(parsed) = lab.to_label() {
+                    self.lines.push(MethodLine::LabelDef(parsed));
+                }
             }
             Line::NamedCatch(catch) => {
-                self.lines
-                    .push(MethodLine::Catch(Catch::Named(catch.to_parsed_unchecked())));
+                if let Some(parsed) = catch.to_parsed() {
+                    self.lines.push(MethodLine::Catch(Catch::Named(parsed)));
+                }
             }
             Line::CatchAll(catch) => {
-                self.lines.push(MethodLine::Catch(Catch::All(
-                    catch.to_parsed_all_unchecked(),
-                )));
+                if let Some(parsed) = catch.to_parsed_all() {
+                    self.lines.push(MethodLine::Catch(Catch::All(parsed)));
+                }
             }
             Line::PackedSwitchData(psd) => {
-                self.packed_switch_data.push(psd.to_parsed_unchecked());
+                if let Some(parsed) = psd.to_parsed() {
+                    self.packed_switch_data.push(parsed);
+                }
             }
             Line::SparseSwitchData(ssd) => {
-                self.sparse_switch_data.push(ssd.to_parsed_unchecked());
+                if let Some(parsed) = ssd.to_parsed() {
+                    self.sparse_switch_data.push(parsed);
+                }
             }
             Line::ArrayData(ad) => {
-                self.array_data.push(ad.to_parsed_unchecked());
+                if let Some(parsed) = ad.to_parsed() {
+                    self.array_data.push(parsed);
+                }
             }
             Line::ParamLine(reg, name, annotations) => {
                 if let Some(ann) = annotations {
