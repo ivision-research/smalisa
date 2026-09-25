@@ -8,12 +8,17 @@ use crate::Primitive;
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub enum Type<'a> {
-    Unknown,
     Class(
         #[cfg_attr(feature = "serde", serde(borrow))] &'a SmaliClassName,
         u8,
     ),
     Primitive(Primitive, u8),
+}
+
+impl<'a> Default for Type<'a> {
+    fn default() -> Self {
+        Self::Primitive(Primitive::Void, 0)
+    }
 }
 
 impl<'a> Hash for Type<'a> {
@@ -26,9 +31,6 @@ impl<'a> Hash for Type<'a> {
             Type::Primitive(prim, size) => {
                 prim.hash(state);
                 size.hash(state);
-            }
-            Type::Unknown => {
-                state.write(&[]);
             }
         }
     }
@@ -43,80 +45,91 @@ impl<'a> fmt::Display for Type<'a> {
             Type::Primitive(prim, size) => {
                 write!(f, "{}{}", "[".repeat(size as usize), prim)
             }
-            Type::Unknown => {
-                write!(f, "?")
-            }
         }
     }
 }
 
 impl<'a> Type<'a> {
-    /// Returns the name of the type as it would appear in smali.
-    pub fn as_smali_str(&self) -> Option<Cow<'a, str>> {
-        match *self {
-            Type::Primitive(prim, size) => {
-                if size == 0 {
-                    Some(Cow::Borrowed(prim.as_smali_str()))
-                } else {
-                    Some(Cow::Owned(format!(
-                        "{}{}",
-                        "[".repeat(size as usize),
-                        prim.as_smali_str()
-                    )))
-                }
+    /// Attempt to parse a single smali type, returning None on failure
+    ///
+    /// This will parse both classes (La/b/C;) and primitives (I, J, Z, etc) as well as arrays of
+    /// either of those
+    pub fn parse_smali(smali: &'a str) -> Option<Self> {
+        let trimmed = smali.trim_start_matches('[');
+        let dim = (smali.len() - trimmed.len()) as u8;
+
+        Some(if trimmed.starts_with('L') {
+            Self::Class(SmaliClassName::new(trimmed), dim)
+        } else {
+            Self::Primitive(Primitive::from_smali_str(trimmed)?, dim)
+        })
+    }
+
+    /// Returns the name of the type as it would appear in smali
+    ///
+    /// This will only fail on
+    pub fn as_smali_str(&self) -> Cow<'a, str> {
+        let (smali, size) = match *self {
+            Type::Primitive(prim, size) => (prim.as_smali_str(), size),
+            Type::Class(cd, size) => (cd.as_str(), size),
+        };
+
+        if size == 0 {
+            Cow::Borrowed(smali)
+        } else {
+            let mut s = String::with_capacity(smali.len() + (size as usize));
+            for _ in 0..size {
+                s.push('[');
             }
-            Type::Class(cd, size) => {
-                if size == 0 {
-                    Some(Cow::Borrowed(cd.as_str()))
-                } else {
-                    Some(Cow::Owned(format!("{}{}", "[".repeat(size as usize), cd)))
-                }
-            }
-            Type::Unknown => None,
+            s.push_str(smali);
+            Cow::Owned(s)
         }
     }
 
     /// Returns the name of the type as it would appear in Java source code.
-    pub fn as_java_str(&self, fully_qualified: bool) -> Option<Cow<'a, str>> {
-        match *self {
-            Type::Primitive(prim, size) => {
-                if size == 0 {
-                    Some(Cow::Borrowed(prim.as_java_str()))
+    pub fn as_java_str(&self, fully_qualified: bool) -> Cow<'a, str> {
+        let (pkg, java, size) = match *self {
+            Type::Primitive(prim, size) => (None, prim.as_java_str(), size),
+            Type::Class(cd, size) => (
+                if fully_qualified {
+                    cd.get_java_package()
                 } else {
-                    Some(Cow::Owned(format!(
-                        "{}{}",
-                        prim.as_java_str(),
-                        "[]".repeat(size as usize)
-                    )))
+                    None
+                },
+                cd.get_simple_class(),
+                size,
+            ),
+        };
+
+        if size == 0 {
+            return match pkg {
+                None => Cow::Borrowed(java),
+                Some(v) => {
+                    let mut s = String::with_capacity(v.len() + 1 + java.len());
+                    s.push_str(&v);
+                    s.push('.');
+                    s.push_str(java);
+                    Cow::Owned(s)
                 }
-            }
-            Type::Class(cd, size) => {
-                let (pkg, class) = cd.split_java_package();
-                if size == 0 {
-                    if fully_qualified {
-                        Some(Cow::Owned(format!("{}.{}", pkg, class)))
-                    } else {
-                        Some(Cow::Borrowed(class))
-                    }
-                } else {
-                    if fully_qualified {
-                        Some(Cow::Owned(format!(
-                            "{}.{}{}",
-                            pkg,
-                            class,
-                            "[]".repeat(size as usize)
-                        )))
-                    } else {
-                        Some(Cow::Owned(format!(
-                            "{}{}",
-                            class,
-                            "[]".repeat(size as usize)
-                        )))
-                    }
-                }
-            }
-            Type::Unknown => None,
+            };
         }
+
+        let needed = java.len() + 2 * (size as usize);
+        let mut s = if let Some(pkg) = &pkg {
+            let mut s = String::with_capacity(needed + pkg.len() + 1);
+            s.push_str(pkg);
+            s.push('.');
+            s
+        } else {
+            String::with_capacity(needed)
+        };
+
+        s.push_str(java);
+        for _ in 0..size {
+            s.push_str("[]");
+        }
+
+        Cow::Owned(s)
     }
 }
 
@@ -142,12 +155,6 @@ impl<'a> Type<'a> {
     }
 }
 
-impl<'a> Default for Type<'a> {
-    fn default() -> Self {
-        Type::Unknown
-    }
-}
-
 impl<'a> From<Primitive> for Type<'a> {
     #[inline(always)]
     fn from(prim: Primitive) -> Self {
@@ -161,44 +168,52 @@ mod test {
     use super::*;
     use crate::SmaliClassName;
 
-    macro_rules! test_java_str {
-        ($ty:expr, $qual:literal) => {
-            let as_str = $ty.as_java_str($qual);
-            assert!(as_str.is_none());
-        };
+    #[test]
+    fn parse_smali() {
+        macro_rules! test_parse {
+            ($smali:literal, $kind:ident, $expected:expr) => {
+                test_parse!($smali, $kind, $expected, 0);
+            };
+            ($smali:literal, $kind:ident, $expected:expr, $dim:literal) => {
+                let parsed = Type::parse_smali($smali).expect(concat!("should parse:", $smali));
+                assert_eq!(parsed, Type::$kind($expected, $dim));
+            };
+        }
 
-        (owned $ty:expr, $expected:literal, $qual:literal) => {{
-            let as_str = $ty.as_java_str($qual);
-            assert_eq!(as_str, Some(Cow::Owned($expected.to_string())));
-        }};
+        test_parse!("I", Primitive, Primitive::Int);
+        test_parse!("J", Primitive, Primitive::Long);
+        test_parse!("S", Primitive, Primitive::Short);
+        test_parse!("B", Primitive, Primitive::Byte);
+        test_parse!("C", Primitive, Primitive::Char);
+        test_parse!("F", Primitive, Primitive::Float);
+        test_parse!("D", Primitive, Primitive::Double);
+        test_parse!("Z", Primitive, Primitive::Bool);
+        test_parse!("V", Primitive, Primitive::Void);
 
-        (borrowed $ty:expr, $expected:literal, $qual:literal) => {{
-            let as_str = $ty.as_java_str($qual);
-            assert_eq!(as_str, Some(Cow::Borrowed($expected)));
-        }};
-    }
+        test_parse!("[I", Primitive, Primitive::Int, 1);
+        test_parse!("[[J", Primitive, Primitive::Long, 2);
 
-    macro_rules! test_smali_str {
-        ($ty:expr) => {
-            let as_str = $ty.as_smali_str();
-            assert!(as_str.is_none());
-        };
-
-        (owned $ty:expr, $expected:literal) => {{
-            let as_str = $ty.as_smali_str();
-            assert_eq!(as_str, Some(Cow::Owned($expected.to_string())));
-        }};
-
-        (borrowed $ty:expr, $expected:literal) => {{
-            let as_str = $ty.as_smali_str();
-            assert_eq!(as_str, Some(Cow::Borrowed($expected)));
-        }};
+        test_parse!("La;", Class, SmaliClassName::new("La;"));
+        test_parse!("La/b/C;", Class, SmaliClassName::new("La/b/C;"));
+        test_parse!("[La;", Class, SmaliClassName::new("La;"), 1);
+        test_parse!("[[La;", Class, SmaliClassName::new("La;"), 2);
     }
 
     #[test]
     fn as_java_str() {
-        test_java_str!(Type::Unknown, false);
-        test_java_str!(Type::Unknown, true);
+        macro_rules! test_java_str {
+            (owned $ty:expr, $expected:literal, $qual:literal) => {{
+                let as_str: Cow<'_, str> = $ty.as_java_str($qual);
+                let expected: Cow<'_, str> = Cow::Owned(String::from($expected));
+                assert_eq!(as_str, expected);
+            }};
+
+            (borrowed $ty:expr, $expected:literal, $qual:literal) => {{
+                let as_str = $ty.as_java_str($qual);
+                assert_eq!(as_str, Cow::Borrowed($expected));
+            }};
+        }
+
         test_java_str!(borrowed Type::Primitive(Primitive::Int, 0), "int", false);
         test_java_str!(borrowed Type::Primitive(Primitive::Long, 0), "long", false);
         test_java_str!(borrowed Type::Primitive(Primitive::Double, 0), "double", false);
@@ -227,8 +242,24 @@ mod test {
     }
     #[test]
     fn as_smali_str() {
-        test_smali_str!(Type::Unknown);
-        test_smali_str!(Type::Unknown);
+        macro_rules! test_smali_str {
+            ($ty:expr) => {
+                let as_str = $ty.as_smali_str();
+                assert!(as_str.is_none());
+            };
+
+            (owned $ty:expr, $expected:literal) => {{
+                let as_str: Cow<'_, str> = $ty.as_smali_str();
+                let expected: Cow<'_, str> = Cow::Owned(String::from($expected));
+                assert_eq!(as_str, expected);
+            }};
+
+            (borrowed $ty:expr, $expected:literal) => {{
+                let as_str = $ty.as_smali_str();
+                assert_eq!(as_str, Cow::Borrowed($expected));
+            }};
+        }
+
         test_smali_str!(borrowed Type::Primitive(Primitive::Int, 0), "I");
         test_smali_str!(borrowed Type::Primitive(Primitive::Long, 0), "J");
         test_smali_str!(borrowed Type::Primitive(Primitive::Double, 0), "D");

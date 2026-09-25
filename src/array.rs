@@ -1,7 +1,7 @@
 use crate::extra::{i8_to_u8, parse_numeric};
 use crate::{NumericLiteral, RawLabel};
 
-#[derive(PartialEq, Debug, Clone, Default)]
+#[derive(PartialEq, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct ArrayData {

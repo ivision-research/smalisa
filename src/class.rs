@@ -1,7 +1,9 @@
 use std::{
     borrow::{Borrow, Cow},
+    convert::Infallible,
     fmt,
     ops::Deref,
+    str::FromStr,
 };
 
 use crate::{method::MethodLineBuilder, AccessFlag, Annotation, Field, Line, Method};
@@ -31,11 +33,60 @@ impl fmt::Display for OwnedSmaliClassName {
     }
 }
 
+fn smali_class_string(s: &str) -> String {
+    let mut owned = String::with_capacity(2 * s.len());
+    owned.push('L');
+    for c in s.chars() {
+        if c == '.' {
+            owned.push('/');
+        } else {
+            owned.push(c);
+        }
+    }
+    owned.push(';');
+    owned
+}
+
+fn is_smali_class(s: &str) -> bool {
+    s.starts_with('L') && s.ends_with(';')
+}
+
+impl FromStr for OwnedSmaliClassName {
+    type Err = Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(if is_smali_class(s) {
+            String::from(s)
+        } else {
+            smali_class_string(s)
+        }))
+    }
+}
+
+impl FromStr for OwnedJavaClassName {
+    type Err = Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(if is_smali_class(s) {
+            smali_class_without_markers(s).replace('/', ".")
+        } else {
+            String::from(s)
+        }))
+    }
+}
+
 impl OwnedSmaliClassName {
     fn new(s: String) -> Self {
         Self(s)
     }
 }
+
+fn smali_class_without_markers(s: &str) -> &str {
+    if s.len() < 2 {
+        ""
+    } else {
+        &s[1..s.len() - 1]
+    }
+}
+
 impl SmaliClassName {
     pub(crate) fn new(s: &str) -> &Self {
         // SAFETY: repr(transparent) guarantees identical layout to str
@@ -51,11 +102,7 @@ impl SmaliClassName {
     ///
     /// Lfoo/bar/Baz; -> foo/bar/Baz
     pub fn without_markers(&self) -> &str {
-        if self.0.len() < 2 {
-            ""
-        } else {
-            &self.0[1..self.0.len() - 1]
-        }
+        smali_class_without_markers(&self.0)
     }
 
     /// Convert the [SmaliClassName] to an [OwnedJavaClassName]
@@ -73,22 +120,27 @@ impl ClassName for SmaliClassName {
         Cow::Owned(self.as_java())
     }
 
-    fn split_java_package(&self) -> (Cow<'_, str>, &'_ str) {
+    fn get_simple_class(&self) -> &'_ str {
         let unmarked = self.without_markers();
+        match unmarked.rsplit_once('/') {
+            None => unmarked,
+            Some((_, class)) => class,
+        }
+    }
 
-        // Lfoo; has no package
-        let Some((pkg, clazz)) = unmarked.rsplit_once('/') else {
-            return (Cow::Borrowed(""), unmarked);
-        };
+    fn get_smali_package(&self) -> Option<Cow<'_, str>> {
+        self.0.rsplit_once('/').map(|(pkg, _)| Cow::Borrowed(pkg))
+    }
 
-        // Lfoo/Baz; can borrow everything while Lfoo/bar/Baz; can't
-        let pkg = if pkg.contains('/') {
+    fn get_java_package(&self) -> Option<Cow<'_, str>> {
+        let unmarked = self.without_markers();
+        let (pkg, _) = unmarked.rsplit_once('/')?;
+
+        Some(if pkg.contains('/') {
             Cow::Owned(pkg.replace('/', "."))
         } else {
             Cow::Borrowed(pkg)
-        };
-
-        (pkg, clazz)
+        })
     }
 }
 
@@ -100,10 +152,10 @@ impl SmaliClassName {
     /// in something like `[Lfoo/bar/Baz;` that is not a type handled by [ClassName]s and this
     /// method will just quietly wrap it as `L[foo/bar/Baz;;` which is definitely not want you want.
     pub fn from_raw(value: &str) -> Cow<'_, Self> {
-        if value.starts_with('L') && value.ends_with(';') {
+        if is_smali_class(value) {
             Cow::Borrowed(SmaliClassName::new(value))
         } else {
-            let owned = format!("L{};", value.replace('.', "/"));
+            let owned = smali_class_string(value);
             Cow::Owned(OwnedSmaliClassName::new(owned))
         }
     }
@@ -131,7 +183,7 @@ impl JavaClassName {
     ///
     /// The same caveats from [ClassName::from_raw] apply here
     pub fn from_raw(value: &str) -> Cow<'_, Self> {
-        if value.starts_with('L') && value.ends_with(';') {
+        if is_smali_class(value) {
             Cow::Owned(SmaliClassName::new(value).as_java())
         } else {
             Cow::Borrowed(JavaClassName::new(value))
@@ -155,8 +207,14 @@ pub trait ClassName {
 
     fn as_java_class_name(&self) -> Cow<'_, JavaClassName>;
 
-    /// Retrieve the Java form of the package and class
-    fn split_java_package(&self) -> (Cow<'_, str>, &'_ str);
+    /// Get the simple name: `foo.bar.Baz` -> `Baz`, `Lfoo/bar/Baz;` -> `Baz`
+    fn get_simple_class(&self) -> &'_ str;
+
+    /// Retrieve the smali form of a package: `Lfoo/bar/Baz;` -> `Lfoo/bar`
+    fn get_smali_package(&self) -> Option<Cow<'_, str>>;
+
+    /// Retrieve the Java form of the package: `foo.bar.Baz` -> `foo.bar`
+    fn get_java_package(&self) -> Option<Cow<'_, str>>;
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Default)]
@@ -165,7 +223,7 @@ pub trait ClassName {
 pub struct OwnedJavaClassName(String);
 
 /// Represents a fully parsed class.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct Class<'a> {
@@ -180,19 +238,17 @@ pub struct Class<'a> {
     pub fields: Vec<Field<'a>>,
 }
 
+#[derive(Default)]
 pub struct ClassLineBuilder<'a> {
-    pub class: Class<'a>,
+    access: AccessFlag,
+    name: &'a SmaliClassName,
+    parent: &'a SmaliClassName,
+    interfaces: Vec<&'a SmaliClassName>,
+    annotations: Vec<Annotation<'a>>,
+    methods: Vec<Method<'a>>,
+    fields: Vec<Field<'a>>,
 
     method: Option<MethodLineBuilder<'a>>,
-}
-
-impl<'a> Default for ClassLineBuilder<'a> {
-    fn default() -> Self {
-        Self {
-            class: Class::default(),
-            method: None,
-        }
-    }
 }
 
 impl<'a> ClassLineBuilder<'a> {
@@ -205,53 +261,91 @@ impl<'a> ClassLineBuilder<'a> {
     /// Note that this function is not state aware, a new [Line::Class] or other class related lines
     /// will overwrite any previously set state. It is up to the caller to manage state and ensure
     /// only a single class's [Line]s are pushed into the builder
-    pub fn push_line(&mut self, line: Line<'a>) {
+    pub fn push_line(&mut self, line: Line<'a>) -> Result<(), String> {
         if matches!(line, Line::MethodEnd) {
             if let Some(method) = self.method.take() {
-                self.class.methods.push(method.finish());
+                self.methods.push(method.finish());
             }
         } else if let Some(method) = &mut self.method {
-            method.push_line(line)
+            method.push_line(line)?;
         } else {
             match line {
                 Line::Class(acc, cd) => {
-                    self.class.access = acc;
-                    self.class.name = cd;
+                    self.access = acc;
+                    self.name = cd;
                 }
                 Line::Super(sup) => {
-                    self.class.parent = sup;
+                    self.parent = sup;
                 }
                 Line::Interface(inf) => {
-                    self.class.interfaces.push(inf);
+                    self.interfaces.push(inf);
                 }
                 Line::MethodHeader(mh) => {
                     self.method = Some(MethodLineBuilder::new(&mh));
                 }
                 Line::Field(field) => {
-                    self.class.fields.push(field);
+                    self.fields.push(field);
                 }
                 Line::Annotation(ann) => {
-                    self.class.annotations.push(ann);
+                    self.annotations.push(ann);
                 }
                 _ => {}
             }
         }
+
+        Ok(())
     }
 
     pub fn finish(self) -> Class<'a> {
         // Note that we don't take out of `self.method` here because that would mean it is an
         // incomplete method: methods should always be taken out when a Line::MethodEnd is
         // discovered during building
-        self.class
+
+        let ClassLineBuilder {
+            access,
+            name,
+            parent,
+            interfaces,
+            annotations,
+            methods,
+            fields,
+            ..
+        } = self;
+
+        Class {
+            access,
+            name,
+            parent,
+            interfaces,
+            annotations,
+            methods,
+            fields,
+        }
     }
 }
 
 impl ClassName for JavaClassName {
-    fn split_java_package(&self) -> (Cow<'_, str>, &'_ str) {
+    fn get_simple_class(&self) -> &'_ str {
         match self.0.rsplit_once('.') {
-            Some((pkg, clazz)) => (Cow::Borrowed(pkg), clazz),
-            None => (Cow::Borrowed(""), &self.0),
+            None => &self.0,
+            Some((_, class)) => class,
         }
+    }
+
+    fn get_smali_package(&self) -> Option<Cow<'_, str>> {
+        let java = self.get_java_package()?;
+        let mut s = String::with_capacity(1 + java.len());
+        s.push('L');
+        if java.contains('.') {
+            s.push_str(&java.replace('.', "/"));
+        } else {
+            s.push_str(&java);
+        }
+        Some(Cow::Owned(s))
+    }
+
+    fn get_java_package(&self) -> Option<Cow<'_, str>> {
+        self.0.rsplit_once('.').map(|(pkg, _)| Cow::Borrowed(pkg))
     }
 
     fn as_smali_class_name(&self) -> Cow<'_, SmaliClassName> {
@@ -272,8 +366,16 @@ impl ClassName for OwnedJavaClassName {
         self.as_ref().as_smali_class_name()
     }
 
-    fn split_java_package(&self) -> (Cow<'_, str>, &'_ str) {
-        self.as_ref().split_java_package()
+    fn get_simple_class(&self) -> &'_ str {
+        self.as_ref().get_simple_class()
+    }
+
+    fn get_smali_package(&self) -> Option<Cow<'_, str>> {
+        self.as_ref().get_smali_package()
+    }
+
+    fn get_java_package(&self) -> Option<Cow<'_, str>> {
+        self.as_ref().get_java_package()
     }
 }
 
@@ -285,9 +387,16 @@ impl ClassName for OwnedSmaliClassName {
     fn as_smali_class_name(&self) -> Cow<'_, SmaliClassName> {
         self.as_ref().as_smali_class_name()
     }
+    fn get_simple_class(&self) -> &'_ str {
+        self.as_ref().get_simple_class()
+    }
 
-    fn split_java_package(&self) -> (Cow<'_, str>, &'_ str) {
-        self.as_ref().split_java_package()
+    fn get_smali_package(&self) -> Option<Cow<'_, str>> {
+        self.as_ref().get_smali_package()
+    }
+
+    fn get_java_package(&self) -> Option<Cow<'_, str>> {
+        self.as_ref().get_java_package()
     }
 }
 
@@ -561,35 +670,34 @@ mod test {
         assert_eq!(name.as_str(), "");
         assert_eq!(name.without_markers(), "");
         assert_eq!(name.as_java().as_str(), "");
-        assert_eq!(name.split_java_package(), (Cow::Borrowed(""), ""));
+        assert_eq!(name.get_java_package(), None);
+        assert_eq!(name.get_smali_package(), None);
     }
 
     #[test]
-    fn splitting_a_smali_package_borrows_what_it_can() {
+    fn getting_java_pkg_from_smali_borrows_what_it_can() {
         // A single segment package needs no dots put in, so it borrows
-        let (pkg, class) = SmaliClassName::new("Lfoo/Baz;").split_java_package();
-        assert!(matches!(pkg, Cow::Borrowed(_)), "{pkg:?}");
-        assert_eq!((pkg.as_ref(), class), ("foo", "Baz"));
+        let pkg = SmaliClassName::new("Lfoo/Baz;").get_java_package();
+        assert_eq!(pkg, Some(Cow::Borrowed("foo")), "{pkg:?}");
 
         // More than one segment has to be rewritten
-        let (pkg, class) = SmaliClassName::new("Lfoo/bar/Baz;").split_java_package();
-        assert!(matches!(pkg, Cow::Owned(_)), "{pkg:?}");
-        assert_eq!((pkg.as_ref(), class), ("foo.bar", "Baz"));
+        let pkg = SmaliClassName::new("Lfoo/bar/Baz;").get_java_package();
+        assert_eq!(pkg, Some(Cow::Owned("foo.bar".into())), "{pkg:?}");
     }
 
     #[test]
-    fn splitting_a_package_handles_the_edges() {
-        let no_pkg = SmaliClassName::new("LBaz;").split_java_package();
-        assert_eq!(no_pkg, (Cow::Borrowed(""), "Baz"));
+    fn getting_a_package_handles_the_edges() {
+        let no_pkg = SmaliClassName::new("LBaz;").get_java_package();
+        assert_eq!(no_pkg, None);
 
-        let nested = SmaliClassName::new("Lfoo/Bar$Inner;").split_java_package();
-        assert_eq!(nested, (Cow::Borrowed("foo"), "Bar$Inner"));
+        let nested = SmaliClassName::new("Lfoo/Bar$Inner;").get_java_package();
+        assert_eq!(nested, Some(Cow::Borrowed("foo")));
 
         let java = JavaClassName::from_raw("foo.bar.Baz");
-        assert_eq!(java.split_java_package(), (Cow::Borrowed("foo.bar"), "Baz"));
+        assert_eq!(java.get_java_package(), Some(Cow::Borrowed("foo.bar")));
 
         let java_no_pkg = JavaClassName::from_raw("Baz");
-        assert_eq!(java_no_pkg.split_java_package(), (Cow::Borrowed(""), "Baz"));
+        assert_eq!(java_no_pkg.get_java_package(), None);
     }
 
     #[test]
@@ -605,8 +713,11 @@ mod test {
         {
             assert_eq!(name.as_smali_class_name().as_str(), "Lfoo/bar/Baz;");
             assert_eq!(name.as_java_class_name().as_str(), "foo.bar.Baz");
-            let (pkg, class) = name.split_java_package();
-            assert_eq!((pkg.as_ref(), class), ("foo.bar", "Baz"));
+            let pkg = name.get_java_package();
+            assert_eq!(pkg.as_ref().map(|it| it.as_ref()), Some("foo.bar"));
+            let pkg = name.get_smali_package();
+            assert_eq!(pkg.as_ref().map(|it| it.as_ref()), Some("Lfoo/bar"));
+            assert_eq!(name.get_simple_class(), "Baz");
         }
 
         check(smali);

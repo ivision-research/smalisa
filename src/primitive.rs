@@ -21,6 +21,21 @@ impl Hash for Primitive {
 }
 
 impl Primitive {
+    pub fn from_smali_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "I" => Self::Int,
+            "J" => Self::Long,
+            "S" => Self::Short,
+            "B" => Self::Byte,
+            "C" => Self::Char,
+            "F" => Self::Float,
+            "D" => Self::Double,
+            "Z" => Self::Bool,
+            "V" => Self::Void,
+            _ => return None,
+        })
+    }
+
     pub fn as_smali_str(&self) -> &'static str {
         match *self {
             Self::Int => "I",

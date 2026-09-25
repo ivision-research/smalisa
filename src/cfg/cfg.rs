@@ -295,9 +295,6 @@ impl<'a> MethodMapCreator<'a> {
                 MethodLine::Catch(catch) => {
                     self.catches.push((*catch, MethodLineId::new(line_num)))
                 }
-                MethodLine::Unset => {
-                    return Err(BuildError::invalid_input("undefined method line"));
-                }
             }
         }
         self.method.instructions = instructions;

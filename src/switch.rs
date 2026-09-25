@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::{Label, RawLabel};
 
 /// A single `key -> label` entry of a packed or sparse switch.
@@ -90,6 +92,16 @@ pub struct RawPackedSwitchData<'a> {
     pub label: RawLabel<'a>,
     pub start: &'a str,
     pub labels: Vec<RawLabel<'a>>,
+}
+
+impl<'a> fmt::Display for RawPackedSwitchData<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, ":{}\n.packed-switch {}\n", self.label, self.start)?;
+        for label in &self.labels {
+            write!(f, "    :{}\n", label)?;
+        }
+        write!(f, ".end packed-switch")
+    }
 }
 
 impl<'a> RawPackedSwitchData<'a> {

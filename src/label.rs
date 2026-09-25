@@ -76,7 +76,6 @@ impl<'a> RawLabel<'a> {
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum Label {
-    Unset,
     Cond(u32),
     Goto(u32),
     PackedSwitch(u32),
@@ -94,7 +93,6 @@ impl fmt::Display for Label {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, ":")?;
         let num = match *self {
-            Self::Unset => return write!(f, "?"),
             Self::Cond(v) => {
                 write!(f, "cond_")?;
                 v
@@ -141,13 +139,6 @@ impl fmt::Display for Label {
             }
         };
         write!(f, "{:x}", num)
-    }
-}
-
-impl Default for Label {
-    #[inline(always)]
-    fn default() -> Self {
-        Self::Unset
     }
 }
 

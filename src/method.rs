@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::hash::Hash;
-use std::ops::{Deref, DerefMut};
 
 use crate::instructions::Invocation;
 use crate::utils::ptr_eq;
@@ -191,7 +190,6 @@ impl<'a> MethodHeader<'a> {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum MethodLine<'a> {
-    Unset,
     #[cfg_attr(feature = "serde", serde(borrow))]
     Instruction(Invocation<'a>),
     LabelDef(Label),
@@ -199,15 +197,8 @@ pub enum MethodLine<'a> {
     Catch(Catch<'a>),
 }
 
-impl<'a> Default for MethodLine<'a> {
-    #[inline(always)]
-    fn default() -> Self {
-        Self::Unset
-    }
-}
-
 /// Represents a fully parsed method.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct Method<'a> {
@@ -225,29 +216,25 @@ pub struct Method<'a> {
 }
 
 pub struct MethodLineBuilder<'a> {
-    method: Method<'a>,
-}
-
-impl<'a> Deref for MethodLineBuilder<'a> {
-    type Target = Method<'a>;
-    fn deref(&self) -> &Self::Target {
-        &self.method
-    }
-}
-
-impl<'a> DerefMut for MethodLineBuilder<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.method
-    }
+    header: MethodHeader<'a>,
+    annotations: Vec<Annotation<'a>>,
+    param_annotations: Option<Vec<ParamAnnotations<'a>>>,
+    lines: Vec<MethodLine<'a>>,
+    packed_switch_data: Vec<SwitchData>,
+    sparse_switch_data: Vec<SwitchData>,
+    array_data: Vec<ArrayData>,
 }
 
 impl<'a> MethodLineBuilder<'a> {
     pub fn new(mh: &MethodHeader<'a>) -> Self {
         Self {
-            method: Method {
-                header: mh.clone(),
-                ..Default::default()
-            },
+            header: mh.clone(),
+            annotations: Vec::new(),
+            param_annotations: None,
+            lines: Vec::new(),
+            packed_switch_data: Vec::new(),
+            sparse_switch_data: Vec::new(),
+            array_data: Vec::new(),
         }
     }
 
@@ -256,9 +243,7 @@ impl<'a> MethodLineBuilder<'a> {
     /// This can be helpful for manually building Methods from [Line]s but note that this type is
     /// completely unaware of state: [Line::MethodEnd] and [Line::MethodHeader] are silently
     /// ignored. It is up to the driver to manage state correctly!
-    pub fn push_line(&mut self, line: Line<'a>) {
-        // TODO: Oh boy we saw a panic finally after all these years, but now this needs to be
-        // fallible but I'm busy
+    pub fn push_line(&mut self, line: Line<'a>) -> Result<(), String> {
         match line {
             Line::Annotation(ann) => {
                 self.annotations.push(ann);
@@ -267,34 +252,43 @@ impl<'a> MethodLineBuilder<'a> {
                 self.lines.push(MethodLine::Instruction(inv));
             }
             Line::LabelDefinition(lab) => {
-                if let Some(parsed) = lab.to_label() {
-                    self.lines.push(MethodLine::LabelDef(parsed));
-                }
+                self.lines.push(MethodLine::LabelDef(
+                    lab.to_label()
+                        .ok_or_else(|| format!("invalid label: {lab}"))?,
+                ));
             }
             Line::NamedCatch(catch) => {
-                if let Some(parsed) = catch.to_parsed() {
-                    self.lines.push(MethodLine::Catch(Catch::Named(parsed)));
-                }
+                let parsed = catch
+                    .to_parsed()
+                    .ok_or_else(|| format!("invalid catch: {catch:?}"))?;
+                self.lines.push(MethodLine::Catch(Catch::Named(parsed)));
             }
             Line::CatchAll(catch) => {
-                if let Some(parsed) = catch.to_parsed_all() {
-                    self.lines.push(MethodLine::Catch(Catch::All(parsed)));
-                }
+                let parsed = catch
+                    .to_parsed_all()
+                    .ok_or_else(|| format!("invalid catch all: {catch:?}"))?;
+                self.lines.push(MethodLine::Catch(Catch::All(parsed)));
             }
             Line::PackedSwitchData(psd) => {
-                if let Some(parsed) = psd.to_parsed() {
-                    self.packed_switch_data.push(parsed);
-                }
+                let parsed = psd
+                    .to_parsed()
+                    .ok_or_else(|| format!("invalid packed switch data: {psd:?}"))?;
+
+                self.packed_switch_data.push(parsed);
             }
             Line::SparseSwitchData(ssd) => {
-                if let Some(parsed) = ssd.to_parsed() {
-                    self.sparse_switch_data.push(parsed);
-                }
+                let parsed = ssd
+                    .to_parsed()
+                    .ok_or_else(|| format!("invalid sparse switch data: {ssd:?}"))?;
+
+                self.sparse_switch_data.push(parsed);
             }
             Line::ArrayData(ad) => {
-                if let Some(parsed) = ad.to_parsed() {
-                    self.array_data.push(parsed);
-                }
+                let parsed = ad
+                    .to_parsed()
+                    .ok_or_else(|| format!("invalid array data: {ad:?}"))?;
+
+                self.array_data.push(parsed);
             }
             Line::ParamLine(reg, name, annotations) => {
                 if let Some(ann) = annotations {
@@ -309,10 +303,29 @@ impl<'a> MethodLineBuilder<'a> {
 
             _ => {}
         }
+        Ok(())
     }
 
     pub fn finish(self) -> Method<'a> {
-        self.method
+        let MethodLineBuilder {
+            header,
+            annotations,
+            param_annotations,
+            lines,
+            packed_switch_data,
+            sparse_switch_data,
+            array_data,
+        } = self;
+
+        Method {
+            header,
+            annotations,
+            param_annotations,
+            lines,
+            packed_switch_data,
+            sparse_switch_data,
+            array_data,
+        }
     }
 }
 

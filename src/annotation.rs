@@ -2,19 +2,14 @@ use crate::literal::RawLiteral;
 use crate::utils::ptr_eq;
 use crate::{Enum, MethodRef, Primitive, Register, Type};
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialEq, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum AnnotationVisibility {
+    #[default]
     Unset,
     Runtime,
     Build,
     System,
-}
-
-impl Default for AnnotationVisibility {
-    fn default() -> Self {
-        Self::Unset
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,7 +70,7 @@ impl<'a> From<Enum<'a>> for AnnotationValue<'a> {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct ParamAnnotations<'a> {

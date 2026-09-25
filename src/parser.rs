@@ -20,7 +20,7 @@ pub fn parse_class<'a, P: LineParse<'a>>(parser: &mut P) -> Result<Class<'a>, Pa
     let mut builder = ClassLineBuilder::new();
     loop {
         match parser.parse_line() {
-            Ok(line) => builder.push_line(line),
+            Ok(line) => builder.push_line(line).map_err(ParseError::Generic)?,
             Err(perr) if perr.is_eof() => return Ok(builder.finish()),
             Err(perr) => return Err(perr),
         }
@@ -45,7 +45,7 @@ pub fn parse_method<'a, P: LineParse<'a>>(parser: &mut P) -> ParseResult<'a, Opt
                 if matches!(line, Line::MethodEnd) {
                     return Ok(Some(builder.finish()));
                 }
-                builder.push_line(line);
+                builder.push_line(line).map_err(ParseError::Generic)?;
             }
         }
     }
@@ -63,6 +63,8 @@ pub enum ParseError<'a> {
     BadLabel(&'a str),
     #[error("unsupported instruction: {0}")]
     UnsupportedInstruction(String),
+    #[error("parsing error: {0}")]
+    Generic(String),
 }
 
 impl<'a> ParseError<'a> {

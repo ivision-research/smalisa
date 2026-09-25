@@ -1,4 +1,5 @@
 use crate::{Label, RawLabel, SmaliClassName};
+use std::fmt;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -9,7 +10,7 @@ pub enum Catch<'a> {
     All(CatchAll),
 }
 
-#[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct NamedCatch<'a> {
@@ -20,7 +21,7 @@ pub struct NamedCatch<'a> {
     pub dest_label: Label,
 }
 
-#[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[derive(Debug, Default, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct RawNamedCatch<'a> {
@@ -32,6 +33,16 @@ pub struct RawNamedCatch<'a> {
     pub end_label: RawLabel<'a>,
     #[cfg_attr(feature = "serde", serde(borrow))]
     pub dest_label: RawLabel<'a>,
+}
+
+impl<'a> fmt::Display for RawNamedCatch<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            ".catch {} {{:{} .. :{}}} :{}",
+            self.class, self.start_label, self.end_label, self.dest_label
+        )
+    }
 }
 
 impl<'a> RawNamedCatch<'a> {
@@ -68,7 +79,7 @@ impl<'a> RawNamedCatch<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct CatchAll {
@@ -77,7 +88,7 @@ pub struct CatchAll {
     pub dest_label: Label,
 }
 
-#[derive(Debug, PartialEq, Clone, Default, Copy)]
+#[derive(Debug, Default, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "yoke", derive(yoke::Yokeable))]
 pub struct RawCatchAll<'a> {
@@ -87,6 +98,16 @@ pub struct RawCatchAll<'a> {
     pub end_label: RawLabel<'a>,
     #[cfg_attr(feature = "serde", serde(borrow))]
     pub dest_label: RawLabel<'a>,
+}
+
+impl<'a> fmt::Display for RawCatchAll<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            ".catchall {{:{} .. :{}}} :{}",
+            self.start_label, self.end_label, self.dest_label
+        )
+    }
 }
 
 impl<'a> RawCatchAll<'a> {
